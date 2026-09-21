@@ -1,6 +1,6 @@
-# [Project name]
+# DLS Prediction Arena
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An API-first multiplayer prediction game for Dream League Soccer players to compete on match outcomes and odds-based points.
 
 ## Run & Operate
 
@@ -22,15 +22,24 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/api-spec/openapi.yaml` — source of truth for the game API and generated client/Zod contracts
+- `lib/db/src/schema/index.ts` — persistent players, matches, rooms, room memberships, and predictions
+- `artifacts/api-server/src/routes/game.ts` — room lifecycle, scoring, match settlement, and SSE updates
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Prediction values are points only; there are no deposits, withdrawals, purchases, or cash-out flows.
+- Odds are locked onto a prediction at submission time so later fixture changes cannot rewrite a player's risk.
+- Room updates use server-sent events, which keeps the first client integration simple while still supporting live multiplayer updates.
+- The first server version accepts a client-provided player ID; production authentication can later map that identity to a Clerk/Replit user without changing game scoring.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Lists seeded DLS-style fixtures with home/draw/away odds.
+- Creates and joins six-character multiplayer rooms.
+- Accepts one replaceable prediction per player, room, and match until kickoff.
+- Scores correct outcomes at `round(odds * 10)` points and exposes ranked room leaderboards.
+- Streams player joins, prediction submissions, and settled match updates over SSE.
 
 ## User preferences
 
@@ -38,7 +47,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Run `pnpm --filter @workspace/db run push` after schema changes before starting the API.
+- Match settlement requires the `X-Admin-Key` header and uses `GAME_ADMIN_KEY`, falling back to the configured `SESSION_SECRET`.
 
 ## Pointers
 

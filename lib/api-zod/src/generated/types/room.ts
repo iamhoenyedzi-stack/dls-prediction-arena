@@ -5,7 +5,8 @@
  * Multiplayer prediction game API for DLS players
  * OpenAPI spec version: 0.1.0
  */
+import type { RoomSummary } from './roomSummary';
 
-export interface HealthStatus {
-  status: string;
-}
+export type Room = RoomSummary & {
+  hostPlayerId: string;
+};

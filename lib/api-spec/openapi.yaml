@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Multiplayer prediction game API for DLS players
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: matches
+    description: DLS fixtures and prediction outcomes
+  - name: rooms
+    description: Multiplayer prediction rooms
 paths:
   /healthz:
     get:
@@ -24,7 +28,214 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /matches:
+    get:
+      operationId: listMatches
+      tags: [matches]
+      summary: List available matches
+      responses:
+        "200":
+          description: Available DLS fixtures
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Match"
+  /matches/{matchId}/result:
+    parameters:
+      - name: matchId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: X-Admin-Key
+        in: header
+        required: true
+        schema: { type: string }
+    put:
+      operationId: settleMatch
+      tags: [matches]
+      summary: Record a completed match result and score predictions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchResultRequest"
+      responses:
+        "200":
+          description: Match settled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Match"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Invalid admin key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /rooms:
+    post:
+      operationId: createRoom
+      tags: [rooms]
+      summary: Create a multiplayer prediction room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoomRequest"
+      responses:
+        "201":
+          description: Room created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Room"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    get:
+      operationId: listRooms
+      tags: [rooms]
+      summary: List open rooms
+      responses:
+        "200":
+          description: Open rooms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RoomSummary"
+  /rooms/{roomCode}:
+    parameters:
+      - $ref: "#/components/parameters/RoomCode"
+    get:
+      operationId: getRoom
+      tags: [rooms]
+      summary: Get a room with fixtures and standings
+      responses:
+        "200":
+          description: Room details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomDetails"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /rooms/{roomCode}/players:
+    parameters:
+      - $ref: "#/components/parameters/RoomCode"
+    post:
+      operationId: joinRoom
+      tags: [rooms]
+      summary: Join a room as a player
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinRoomRequest"
+      responses:
+        "201":
+          description: Player joined
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Player"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /rooms/{roomCode}/predictions:
+    parameters:
+      - $ref: "#/components/parameters/RoomCode"
+    post:
+      operationId: submitPrediction
+      tags: [rooms]
+      summary: Submit or replace a prediction before kickoff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitPredictionRequest"
+      responses:
+        "201":
+          description: Prediction accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prediction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Prediction is locked or player is not in the room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /rooms/{roomCode}/leaderboard:
+    parameters:
+      - $ref: "#/components/parameters/RoomCode"
+    get:
+      operationId: getLeaderboard
+      tags: [rooms]
+      summary: Get room standings
+      responses:
+        "200":
+          description: Standings ordered by score
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardEntry"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /rooms/{roomCode}/events:
+    parameters:
+      - $ref: "#/components/parameters/RoomCode"
+    get:
+      operationId: roomEvents
+      tags: [rooms]
+      summary: Subscribe to room updates over server-sent events
+      responses:
+        "200":
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
 components:
+  parameters:
+    RoomCode:
+      name: roomCode
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Z0-9]{6}$"
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +244,118 @@ components:
           type: string
       required:
         - status
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+    Match:
+      type: object
+      properties:
+        id: { type: string }
+        homeTeam: { type: string }
+        awayTeam: { type: string }
+        kickoffAt: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [scheduled, live, finished]
+        homeOdds: { type: number }
+        drawOdds: { type: number }
+        awayOdds: { type: number }
+        homeScore: { type: integer, nullable: true }
+        awayScore: { type: integer, nullable: true }
+      required: [id, homeTeam, awayTeam, kickoffAt, status, homeOdds, drawOdds, awayOdds]
+    MatchResultRequest:
+      type: object
+      properties:
+        homeScore: { type: integer, minimum: 0 }
+        awayScore: { type: integer, minimum: 0 }
+      required: [homeScore, awayScore]
+    CreateRoomRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 3, maxLength: 40 }
+        hostName: { type: string, minLength: 2, maxLength: 24 }
+        maxPlayers: { type: integer, minimum: 2, maximum: 50, default: 20 }
+      required: [name, hostName]
+    RoomSummary:
+      type: object
+      properties:
+        code: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [lobby, live, finished]
+        playerCount: { type: integer }
+        maxPlayers: { type: integer }
+        createdAt: { type: string, format: date-time }
+      required: [code, name, status, playerCount, maxPlayers, createdAt]
+    Room:
+      allOf:
+        - $ref: "#/components/schemas/RoomSummary"
+        - type: object
+          properties:
+            hostPlayerId: { type: string }
+          required: [hostPlayerId]
+    RoomDetails:
+      allOf:
+        - $ref: "#/components/schemas/Room"
+        - type: object
+          properties:
+            players:
+              type: array
+              items: { $ref: "#/components/schemas/Player" }
+            matches:
+              type: array
+              items: { $ref: "#/components/schemas/Match" }
+            leaderboard:
+              type: array
+              items: { $ref: "#/components/schemas/LeaderboardEntry" }
+          required: [players, matches, leaderboard]
+    Player:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        joinedAt: { type: string, format: date-time }
+      required: [id, name, joinedAt]
+    JoinRoomRequest:
+      type: object
+      properties:
+        playerId: { type: string, minLength: 3, maxLength: 64 }
+        name: { type: string, minLength: 2, maxLength: 24 }
+      required: [playerId, name]
+    SubmitPredictionRequest:
+      type: object
+      properties:
+        playerId: { type: string, minLength: 3, maxLength: 64 }
+        matchId: { type: string }
+        outcome:
+          type: string
+          enum: [home, draw, away]
+      required: [playerId, matchId, outcome]
+    Prediction:
+      type: object
+      properties:
+        id: { type: string }
+        matchId: { type: string }
+        playerId: { type: string }
+        outcome:
+          type: string
+          enum: [home, draw, away]
+        odds: { type: number }
+        points: { type: integer }
+        submittedAt: { type: string, format: date-time }
+      required: [id, matchId, playerId, outcome, odds, points, submittedAt]
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank: { type: integer }
+        playerId: { type: string }
+        playerName: { type: string }
+        points: { type: integer }
+        predictions: { type: integer }
+        correct: { type: integer }
+      required: [rank, playerId, playerName, points, predictions, correct]
 

@@ -1,0 +1,1 @@
+- [DLS game server](game-server-decisions.md) — points-only rooms, odds-locked predictions, and ranked multiplayer scoring are the core product rules.
