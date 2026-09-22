@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "DLS Prediction Arena"
+description = "A mobile-friendly web client for joining the Friday Night League, choosing DLS match outcomes using live odds, submitting predictions, and following the room leaderboard."
+version = "1.0.0"
+id = "artifacts/dls-prediction-arena-web"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25033
+
+[services.development]
+run = "pnpm --filter @workspace/dls-prediction-arena-web run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dls-prediction-arena-web", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/dls-prediction-arena-web/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25033"
+BASE_PATH = "/"
