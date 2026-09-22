@@ -7,16 +7,20 @@
  */
 
 export * from './badRequestResponse';
+export * from './createMatchRequest';
 export * from './createRoomRequest';
 export * from './error';
 export * from './healthStatus';
 export * from './joinRoomRequest';
 export * from './leaderboardEntry';
 export * from './match';
+export * from './matchResult';
 export * from './matchResultRequest';
+export * from './matchResultRequestResult';
 export * from './matchStatus';
 export * from './notFoundResponse';
 export * from './player';
+export * from './playerRecord';
 export * from './prediction';
 export * from './predictionOutcome';
 export * from './room';

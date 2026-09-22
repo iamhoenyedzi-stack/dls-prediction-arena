@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SubmitPredictionRequestOutcome = typeof SubmitPredictionRequestOutcome[keyof typeof SubmitPredictionRequestOutcome];
+export type MatchResultRequestResult = typeof MatchResultRequestResult[keyof typeof MatchResultRequestResult];
 
 
-export const SubmitPredictionRequestOutcome = {
+export const MatchResultRequestResult = {
   a: 'a',
   draw: 'draw',
   b: 'b',

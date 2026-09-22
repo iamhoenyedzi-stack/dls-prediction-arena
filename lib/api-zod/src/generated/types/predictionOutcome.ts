@@ -10,7 +10,7 @@ export type PredictionOutcome = typeof PredictionOutcome[keyof typeof Prediction
 
 
 export const PredictionOutcome = {
-  home: 'home',
+  a: 'a',
   draw: 'draw',
-  away: 'away',
+  b: 'b',
 } as const;

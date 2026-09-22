@@ -79,6 +79,36 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           $ref: "#/components/responses/NotFound"
+  /rooms/{roomCode}/matches:
+    parameters:
+      - $ref: "#/components/parameters/RoomCode"
+    post:
+      operationId: createMatch
+      tags: [rooms]
+      summary: Create a DLS player challenge in a room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMatchRequest"
+      responses:
+        "201":
+          description: Challenge created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Match"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Creator is not in the room or the schedule is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /rooms:
     post:
       operationId: createRoom
@@ -254,24 +284,47 @@ components:
       type: object
       properties:
         id: { type: string }
-        homeTeam: { type: string }
-        awayTeam: { type: string }
-        kickoffAt: { type: string, format: date-time }
+        playerAName: { type: string }
+        playerBName: { type: string }
+        scheduledAt: { type: string, format: date-time }
         status:
           type: string
           enum: [scheduled, live, finished]
-        homeOdds: { type: number }
+        playerAOdds: { type: number }
         drawOdds: { type: number }
-        awayOdds: { type: number }
-        homeScore: { type: integer, nullable: true }
-        awayScore: { type: integer, nullable: true }
-      required: [id, homeTeam, awayTeam, kickoffAt, status, homeOdds, drawOdds, awayOdds]
+        playerBOdds: { type: number }
+        result:
+          type: string
+          enum: [a, draw, b]
+          nullable: true
+        creatorPlayerId: { type: string, nullable: true }
+        playerARecord:
+          $ref: "#/components/schemas/PlayerRecord"
+        playerBRecord:
+          $ref: "#/components/schemas/PlayerRecord"
+      required: [id, playerAName, playerBName, scheduledAt, status, playerAOdds, drawOdds, playerBOdds, playerARecord, playerBRecord]
     MatchResultRequest:
       type: object
       properties:
-        homeScore: { type: integer, minimum: 0 }
-        awayScore: { type: integer, minimum: 0 }
-      required: [homeScore, awayScore]
+        actorPlayerId: { type: string, minLength: 3, maxLength: 64 }
+        result:
+          type: string
+          enum: [a, draw, b]
+      required: [actorPlayerId, result]
+    CreateMatchRequest:
+      type: object
+      properties:
+        creatorPlayerId: { type: string, minLength: 3, maxLength: 64 }
+        playerAName: { type: string, minLength: 2, maxLength: 40 }
+        playerBName: { type: string, minLength: 2, maxLength: 40 }
+        scheduledAt: { type: string, format: date-time }
+      required: [creatorPlayerId, playerAName, playerBName, scheduledAt]
+    PlayerRecord:
+      type: object
+      properties:
+        wins: { type: integer, minimum: 0 }
+        losses: { type: integer, minimum: 0 }
+      required: [wins, losses]
     CreateRoomRequest:
       type: object
       properties:
@@ -333,7 +386,7 @@ components:
         matchId: { type: string }
         outcome:
           type: string
-          enum: [home, draw, away]
+          enum: [a, draw, b]
       required: [playerId, matchId, outcome]
     Prediction:
       type: object
@@ -343,7 +396,7 @@ components:
         playerId: { type: string }
         outcome:
           type: string
-          enum: [home, draw, away]
+          enum: [a, draw, b]
         odds: { type: number }
         points: { type: integer }
         submittedAt: { type: string, format: date-time }

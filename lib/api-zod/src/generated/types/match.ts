@@ -5,17 +5,21 @@
  * Multiplayer prediction game API for DLS players
  * OpenAPI spec version: 0.1.0
  */
+import type { MatchResult } from './matchResult';
 import type { MatchStatus } from './matchStatus';
+import type { PlayerRecord } from './playerRecord';
 
 export interface Match {
   id: string;
-  homeTeam: string;
-  awayTeam: string;
-  kickoffAt: Date;
+  playerAName: string;
+  playerBName: string;
+  scheduledAt: Date;
   status: MatchStatus;
-  homeOdds: number;
+  playerAOdds: number;
   drawOdds: number;
-  awayOdds: number;
-  homeScore?: number | null;
-  awayScore?: number | null;
+  playerBOdds: number;
+  result?: MatchResult;
+  creatorPlayerId?: string | null;
+  playerARecord: PlayerRecord;
+  playerBRecord: PlayerRecord;
 }

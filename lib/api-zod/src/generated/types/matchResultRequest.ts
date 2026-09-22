@@ -5,10 +5,13 @@
  * Multiplayer prediction game API for DLS players
  * OpenAPI spec version: 0.1.0
  */
+import type { MatchResultRequestResult } from './matchResultRequestResult';
 
 export interface MatchResultRequest {
-  /** @minimum 0 */
-  homeScore: number;
-  /** @minimum 0 */
-  awayScore: number;
+  /**
+     * @minLength 3
+     * @maxLength 64
+     */
+  actorPlayerId: string;
+  result: MatchResultRequestResult;
 }

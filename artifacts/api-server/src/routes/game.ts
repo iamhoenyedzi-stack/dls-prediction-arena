@@ -1,6 +1,8 @@
 import { randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { Router, type IRouter, type Response } from "express";
 import {
+  CreateMatchBody,
+  CreateMatchParams,
   CreateRoomBody,
   GetLeaderboardParams,
   GetRoomParams,
@@ -8,6 +10,7 @@ import {
   JoinRoomParams,
   ListMatchesResponse,
   ListRoomsResponse,
+  SettleMatchBody,
   SubmitPredictionBody,
   SubmitPredictionParams,
 } from "@workspace/api-zod";
@@ -19,9 +22,10 @@ import {
   roomPlayersTable,
   roomsTable,
 } from "@workspace/db";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
-type Outcome = "home" | "draw" | "away";
+type Outcome = "a" | "draw" | "b";
+type PlayerRecord = { wins: number; losses: number };
 
 const router: IRouter = Router();
 const subscribers = new Map<string, Set<Response>>();
@@ -37,30 +41,112 @@ const makeRoomCode = () => {
 };
 
 const outcomeForScore = (homeScore: number, awayScore: number): Outcome =>
-  homeScore > awayScore ? "home" : homeScore < awayScore ? "away" : "draw";
+  homeScore > awayScore ? "a" : homeScore < awayScore ? "b" : "draw";
 
 const oddsForOutcome = (
   match: { homeOdds: number; drawOdds: number; awayOdds: number },
   outcome: Outcome,
 ) =>
-  outcome === "home"
+  outcome === "a"
     ? match.homeOdds
     : outcome === "draw"
       ? match.drawOdds
       : match.awayOdds;
 
-const serializeMatch = (match: typeof matchesTable.$inferSelect) => ({
+const playerKey = (name: string) => name.trim().toLocaleLowerCase();
+
+const calculateOdds = (playerA: PlayerRecord, playerB: PlayerRecord) => {
+  const aStrength = (playerA.wins + 1) / (playerA.losses + 1);
+  const bStrength = (playerB.wins + 1) / (playerB.losses + 1);
+  const drawStrength = 0.5;
+  const total = aStrength + bStrength + drawStrength;
+
+  return {
+    playerAOdds: Number((total / aStrength).toFixed(2)),
+    drawOdds: Number((total / drawStrength).toFixed(2)),
+    playerBOdds: Number((total / bStrength).toFixed(2)),
+  };
+};
+
+const getPlayerRecords = async (roomId?: string) => {
+  const finishedMatches = await db
+    .select({
+      playerAName: matchesTable.homeTeam,
+      playerBName: matchesTable.awayTeam,
+      result: matchesTable.result,
+      playerAScore: matchesTable.homeScore,
+      playerBScore: matchesTable.awayScore,
+    })
+    .from(matchesTable)
+    .where(
+      roomId
+        ? and(eq(matchesTable.roomId, roomId), eq(matchesTable.status, "finished"))
+        : eq(matchesTable.status, "finished"),
+    );
+
+  const records = new Map<string, PlayerRecord>();
+  const ensure = (name: string) => {
+    const key = playerKey(name);
+    const existing = records.get(key);
+    if (existing) return existing;
+    const next = { wins: 0, losses: 0 };
+    records.set(key, next);
+    return next;
+  };
+
+  for (const match of finishedMatches) {
+    const result =
+      match.result === "a" || match.result === "b" || match.result === "draw"
+        ? match.result
+        : match.playerAScore !== null && match.playerBScore !== null
+          ? outcomeForScore(match.playerAScore, match.playerBScore)
+          : null;
+    if (!result) continue;
+    const playerA = ensure(match.playerAName);
+    const playerB = ensure(match.playerBName);
+    if (result === "a") {
+      playerA.wins += 1;
+      playerB.losses += 1;
+    } else if (result === "b") {
+      playerB.wins += 1;
+      playerA.losses += 1;
+    }
+  }
+
+  return records;
+};
+
+const serializeMatch = (
+  match: typeof matchesTable.$inferSelect,
+  records: Map<string, PlayerRecord>,
+) => {
+  const playerARecord = records.get(playerKey(match.homeTeam)) ?? {
+    wins: 0,
+    losses: 0,
+  };
+  const playerBRecord = records.get(playerKey(match.awayTeam)) ?? {
+    wins: 0,
+    losses: 0,
+  };
+
+  return {
   id: match.id,
-  homeTeam: match.homeTeam,
-  awayTeam: match.awayTeam,
-  kickoffAt: match.kickoffAt,
+  playerAName: match.homeTeam,
+  playerBName: match.awayTeam,
+  scheduledAt: match.kickoffAt,
   status: match.status as "scheduled" | "live" | "finished",
-  homeOdds: match.homeOdds,
+  playerAOdds: match.homeOdds,
   drawOdds: match.drawOdds,
-  awayOdds: match.awayOdds,
-  homeScore: match.homeScore,
-  awayScore: match.awayScore,
-});
+  playerBOdds: match.awayOdds,
+  result:
+    match.result === "a" || match.result === "draw" || match.result === "b"
+      ? match.result
+      : null,
+  creatorPlayerId: match.createdBy,
+  playerARecord,
+  playerBRecord,
+  };
+};
 
 const getRoom = async (code: string) => {
   const rows = await db
@@ -123,33 +209,22 @@ router.get("/matches", async (_req, res) => {
     .select()
     .from(matchesTable)
     .orderBy(asc(matchesTable.kickoffAt));
-  res.json(ListMatchesResponse.parse(matches.map(serializeMatch)));
+  const records = await getPlayerRecords();
+  res.json(ListMatchesResponse.parse(matches.map((match) => serializeMatch(match, records))));
 });
 
 router.put("/matches/:matchId/result", async (req, res) => {
+  const parsed = SettleMatchBody.safeParse(req.body);
+  if (!parsed.success) return error(res, 400, "Invalid match result");
+
   const configuredKey = process.env.GAME_ADMIN_KEY ?? process.env.SESSION_SECRET;
   const providedKey = req.get("x-admin-key") ?? "";
-  if (!configuredKey) return error(res, 503, "Match settlement is not configured");
-
-  const expected = Buffer.from(configuredKey);
-  const provided = Buffer.from(providedKey);
-  if (
-    expected.length !== provided.length ||
-    !timingSafeEqual(expected, provided)
-  ) {
-    return error(res, 403, "Invalid admin key");
-  }
-
-  const homeScore = Number(req.body?.homeScore);
-  const awayScore = Number(req.body?.awayScore);
-  if (
-    !Number.isInteger(homeScore) ||
-    !Number.isInteger(awayScore) ||
-    homeScore < 0 ||
-    awayScore < 0
-  ) {
-    return error(res, 400, "Scores must be non-negative integers");
-  }
+  const adminAuthorized = Boolean(
+    configuredKey &&
+      providedKey &&
+      Buffer.byteLength(configuredKey) === Buffer.byteLength(providedKey) &&
+      timingSafeEqual(Buffer.from(configuredKey), Buffer.from(providedKey)),
+  );
 
   const matches = await db
     .select()
@@ -158,14 +233,39 @@ router.put("/matches/:matchId/result", async (req, res) => {
     .limit(1);
   const match = matches[0];
   if (!match) return error(res, 404, "Match not found");
+  if (match.status === "finished") return error(res, 409, "Match is already settled");
+
+  const room = match.roomId
+    ? (
+        await db
+          .select()
+          .from(roomsTable)
+          .where(eq(roomsTable.id, match.roomId))
+          .limit(1)
+      )[0]
+    : undefined;
+  const creatorAuthorized = Boolean(
+    room &&
+      (match.createdBy === parsed.data.actorPlayerId ||
+        room.hostPlayerId === parsed.data.actorPlayerId),
+  );
+  if (!adminAuthorized && !creatorAuthorized) {
+    return error(res, 403, "Only the challenge creator, room host, or moderator can settle this match");
+  }
+  if (match.kickoffAt > new Date()) {
+    return error(res, 409, "This match has not reached its scheduled time");
+  }
+
+  const result = parsed.data.result as Outcome;
+  const homeScore = result === "a" ? 1 : 0;
+  const awayScore = result === "b" ? 1 : 0;
 
   const [updated] = await db
     .update(matchesTable)
-    .set({ status: "finished", homeScore, awayScore })
+    .set({ status: "finished", result, homeScore, awayScore })
     .where(eq(matchesTable.id, match.id))
     .returning();
 
-  const result = outcomeForScore(homeScore, awayScore);
   const predictions = await db
     .select()
     .from(predictionsTable)
@@ -178,7 +278,7 @@ router.put("/matches/:matchId/result", async (req, res) => {
       .update(predictionsTable)
       .set({
         points:
-          prediction.outcome === result
+          (prediction.outcome === "home" ? "a" : prediction.outcome === "away" ? "b" : prediction.outcome) === result
             ? Math.round(prediction.odds * 10)
             : 0,
       })
@@ -191,14 +291,80 @@ router.put("/matches/:matchId/result", async (req, res) => {
       .from(roomsTable)
       .where(inArray(roomsTable.id, [...roomIds]));
     for (const room of roomRows) {
-      publish(room.code, "match_settled", serializeMatch(updated));
+      const records = await getPlayerRecords(room.id);
+      publish(room.code, "match_settled", serializeMatch(updated, records));
       publish(room.code, "leaderboard_updated", {
         leaderboard: await getLeaderboard(room.id),
       });
     }
   }
 
-  return res.json(serializeMatch(updated));
+  const records = await getPlayerRecords(match.roomId ?? undefined);
+  return res.json(serializeMatch(updated, records));
+});
+
+router.post("/rooms/:roomCode/matches", async (req, res) => {
+  const params = CreateMatchParams.safeParse(req.params);
+  const body = CreateMatchBody.safeParse(req.body);
+  if (!params.success || !body.success) {
+    return error(res, 400, "Invalid challenge details");
+  }
+
+  const room = await getRoom(params.data.roomCode);
+  if (!room) return error(res, 404, "Room not found");
+  if (room.status === "finished") return error(res, 409, "This room is finished");
+
+  const membership = await db
+    .select()
+    .from(roomPlayersTable)
+    .where(
+      and(
+        eq(roomPlayersTable.roomId, room.id),
+        eq(roomPlayersTable.playerId, body.data.creatorPlayerId),
+      ),
+    )
+    .limit(1);
+  if (!membership[0]) return error(res, 409, "Join the room before creating a challenge");
+
+  const playerAName = body.data.playerAName.trim();
+  const playerBName = body.data.playerBName.trim();
+  if (playerKey(playerAName) === playerKey(playerBName)) {
+    return error(res, 400, "Player A and Player B must be different");
+  }
+  if (body.data.scheduledAt <= new Date()) {
+    return error(res, 400, "Scheduled time must be in the future");
+  }
+
+  const records = await getPlayerRecords(room.id);
+  const playerARecord = records.get(playerKey(playerAName)) ?? {
+    wins: 0,
+    losses: 0,
+  };
+  const playerBRecord = records.get(playerKey(playerBName)) ?? {
+    wins: 0,
+    losses: 0,
+  };
+  const odds = calculateOdds(playerARecord, playerBRecord);
+  const [match] = await db
+    .insert(matchesTable)
+    .values({
+      roomId: room.id,
+      createdBy: body.data.creatorPlayerId,
+      homeTeam: playerAName,
+      awayTeam: playerBName,
+      kickoffAt: body.data.scheduledAt,
+      status: "scheduled",
+      homeOdds: odds.playerAOdds,
+      drawOdds: odds.drawOdds,
+      awayOdds: odds.playerBOdds,
+      result: null,
+    })
+    .returning();
+
+  publish(room.code, "match_created", {
+    match: serializeMatch(match, records),
+  });
+  return res.status(201).json(serializeMatch(match, records));
 });
 
 router.get("/rooms", async (_req, res) => {
@@ -285,7 +451,9 @@ router.get("/rooms/:roomCode", async (req, res) => {
   const matches = await db
     .select()
     .from(matchesTable)
+    .where(eq(matchesTable.roomId, room.id))
     .orderBy(asc(matchesTable.kickoffAt));
+  const records = await getPlayerRecords(room.id);
 
   return res.json({
     code: room.code,
@@ -296,7 +464,7 @@ router.get("/rooms/:roomCode", async (req, res) => {
     createdAt: room.createdAt,
     hostPlayerId: room.hostPlayerId,
     players,
-    matches: matches.map(serializeMatch),
+    matches: matches.map((match) => serializeMatch(match, records)),
     leaderboard: await getLeaderboard(room.id),
   });
 });
@@ -367,7 +535,12 @@ router.post("/rooms/:roomCode/predictions", async (req, res) => {
   const matches = await db
     .select()
     .from(matchesTable)
-    .where(eq(matchesTable.id, body.data.matchId))
+    .where(
+      and(
+        eq(matchesTable.id, body.data.matchId),
+        eq(matchesTable.roomId, room.id),
+      ),
+    )
     .limit(1);
   const match = matches[0];
   if (!match) return error(res, 404, "Match not found");
@@ -442,39 +615,67 @@ router.get("/rooms/:roomCode/events", async (req, res) => {
 });
 
 export const seedDemoMatches = async () => {
-  const existing = await db.select({ id: matchesTable.id }).from(matchesTable).limit(1);
-  if (existing.length) return;
+  const room = await getRoom("QBQ5V5");
+  if (!room) return;
 
+  const roomMatches = await db
+    .select()
+    .from(matchesTable)
+    .where(eq(matchesTable.roomId, room.id));
+  if (roomMatches.length) return;
+
+  const legacyMatches = await db
+    .select()
+    .from(matchesTable)
+    .where(isNull(matchesTable.roomId))
+    .orderBy(asc(matchesTable.kickoffAt));
   const now = Date.now();
-  await db.insert(matchesTable).values([
-    {
-      homeTeam: "Red Lions",
-      awayTeam: "Blue Sharks",
-      kickoffAt: new Date(now + 45 * 60_000),
+  const seedPlayers = [
+    ["Kwame “Ice” Mensah", "Yaw “The Wall” Boateng", 45],
+    ["Kojo “Clutch” Asante", "Nana “Rocket” Owusu", 120],
+    ["Kofi “Viper” Addo", "Esi “Maestro” Quaye", 240],
+  ] as const;
+
+  if (legacyMatches.length) {
+    for (const [index, match] of legacyMatches.slice(0, seedPlayers.length).entries()) {
+      const [playerAName, playerBName, minutes] = seedPlayers[index];
+      const odds = calculateOdds({ wins: 0, losses: 0 }, { wins: 0, losses: 0 });
+      await db
+        .update(matchesTable)
+        .set({
+          roomId: room.id,
+          createdBy: room.hostPlayerId,
+          homeTeam: playerAName,
+          awayTeam: playerBName,
+          kickoffAt: new Date(now + minutes * 60_000),
+          status: "scheduled",
+          homeOdds: odds.playerAOdds,
+          drawOdds: odds.drawOdds,
+          awayOdds: odds.playerBOdds,
+          result: null,
+          homeScore: null,
+          awayScore: null,
+        })
+        .where(eq(matchesTable.id, match.id));
+    }
+    return;
+  }
+
+  const odds = calculateOdds({ wins: 0, losses: 0 }, { wins: 0, losses: 0 });
+  await db.insert(matchesTable).values(
+    seedPlayers.map(([playerAName, playerBName, minutes]) => ({
+      roomId: room.id,
+      createdBy: room.hostPlayerId,
+      homeTeam: playerAName,
+      awayTeam: playerBName,
+      kickoffAt: new Date(now + minutes * 60_000),
       status: "scheduled",
-      homeOdds: 1.65,
-      drawOdds: 3.4,
-      awayOdds: 4.8,
-    },
-    {
-      homeTeam: "Golden Eagles",
-      awayTeam: "Street Kings",
-      kickoffAt: new Date(now + 2 * 60 * 60_000),
-      status: "scheduled",
-      homeOdds: 2.15,
-      drawOdds: 3.1,
-      awayOdds: 2.85,
-    },
-    {
-      homeTeam: "Accra Stars",
-      awayTeam: "Lagoon FC",
-      kickoffAt: new Date(now + 4 * 60 * 60_000),
-      status: "scheduled",
-      homeOdds: 1.9,
-      drawOdds: 3.25,
-      awayOdds: 3.65,
-    },
-  ]);
+      homeOdds: odds.playerAOdds,
+      drawOdds: odds.drawOdds,
+      awayOdds: odds.playerBOdds,
+      result: null,
+    })),
+  );
 };
 
 export default router;

@@ -22,24 +22,72 @@ export const MatchStatus = {
   finished: 'finished',
 } as const;
 
-export interface Match {
-  id: string;
-  homeTeam: string;
-  awayTeam: string;
-  kickoffAt: string;
-  status: MatchStatus;
-  homeOdds: number;
-  drawOdds: number;
-  awayOdds: number;
-  homeScore?: number | null;
-  awayScore?: number | null;
+export type MatchResult = typeof MatchResult[keyof typeof MatchResult] | null;
+
+
+export const MatchResult = {
+  a: 'a',
+  draw: 'draw',
+  b: 'b',
+} as const;
+
+export interface PlayerRecord {
+  /** @minimum 0 */
+  wins: number;
+  /** @minimum 0 */
+  losses: number;
 }
 
+export interface Match {
+  id: string;
+  playerAName: string;
+  playerBName: string;
+  scheduledAt: string;
+  status: MatchStatus;
+  playerAOdds: number;
+  drawOdds: number;
+  playerBOdds: number;
+  result?: MatchResult;
+  creatorPlayerId?: string | null;
+  playerARecord: PlayerRecord;
+  playerBRecord: PlayerRecord;
+}
+
+export type MatchResultRequestResult = typeof MatchResultRequestResult[keyof typeof MatchResultRequestResult];
+
+
+export const MatchResultRequestResult = {
+  a: 'a',
+  draw: 'draw',
+  b: 'b',
+} as const;
+
 export interface MatchResultRequest {
-  /** @minimum 0 */
-  homeScore: number;
-  /** @minimum 0 */
-  awayScore: number;
+  /**
+     * @minLength 3
+     * @maxLength 64
+     */
+  actorPlayerId: string;
+  result: MatchResultRequestResult;
+}
+
+export interface CreateMatchRequest {
+  /**
+     * @minLength 3
+     * @maxLength 64
+     */
+  creatorPlayerId: string;
+  /**
+     * @minLength 2
+     * @maxLength 40
+     */
+  playerAName: string;
+  /**
+     * @minLength 2
+     * @maxLength 40
+     */
+  playerBName: string;
+  scheduledAt: string;
 }
 
 export interface CreateRoomRequest {
@@ -120,9 +168,9 @@ export type SubmitPredictionRequestOutcome = typeof SubmitPredictionRequestOutco
 
 
 export const SubmitPredictionRequestOutcome = {
-  home: 'home',
+  a: 'a',
   draw: 'draw',
-  away: 'away',
+  b: 'b',
 } as const;
 
 export interface SubmitPredictionRequest {
@@ -139,9 +187,9 @@ export type PredictionOutcome = typeof PredictionOutcome[keyof typeof Prediction
 
 
 export const PredictionOutcome = {
-  home: 'home',
+  a: 'a',
   draw: 'draw',
-  away: 'away',
+  b: 'b',
 } as const;
 
 export interface Prediction {

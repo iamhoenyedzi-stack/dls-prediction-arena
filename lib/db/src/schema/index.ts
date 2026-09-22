@@ -23,6 +23,8 @@ export const playersTable = pgTable(
 
 export const matchesTable = pgTable("matches", {
   id: uuid("id").defaultRandom().primaryKey(),
+  roomId: uuid("room_id"),
+  createdBy: text("created_by"),
   homeTeam: text("home_team").notNull(),
   awayTeam: text("away_team").notNull(),
   kickoffAt: timestamp("kickoff_at", { withTimezone: true }).notNull(),
@@ -30,6 +32,7 @@ export const matchesTable = pgTable("matches", {
   homeOdds: real("home_odds").notNull(),
   drawOdds: real("draw_odds").notNull(),
   awayOdds: real("away_odds").notNull(),
+  result: text("result"),
   homeScore: integer("home_score"),
   awayScore: integer("away_score"),
   createdAt: timestamp("created_at", { withTimezone: true })
