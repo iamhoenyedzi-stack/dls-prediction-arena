@@ -21,6 +21,7 @@ import type {
 
 import type {
   BadRequestResponse,
+  ConfirmMatchResultRequest,
   CreateMatchRequest,
   CreateRoomRequest,
   Error,
@@ -28,10 +29,12 @@ import type {
   JoinRoomRequest,
   LeaderboardEntry,
   Match,
-  MatchResultRequest,
   NotFoundResponse,
   Player,
   Prediction,
+  RegisterPlayerRequest,
+  RegisteredPlayer,
+  ReportMatchResultRequest,
   Room,
   RoomDetails,
   RoomSummary,
@@ -220,7 +223,7 @@ export function useListMatches<TData = Awaited<ReturnType<typeof listMatches>>, 
 
 
 
-export const getSettleMatchUrl = (matchId: string,) => {
+export const getReportMatchResultUrl = (matchId: string,) => {
 
 
 
@@ -229,10 +232,10 @@ export const getSettleMatchUrl = (matchId: string,) => {
 }
 
 /**
- * @summary Record a completed match result and score predictions
+ * @summary Report a provisional match result
  */
-export const settleMatch = async (matchId: string,
-    matchResultRequest: MatchResultRequest, options?: Parameters<typeof customFetch>[1]): Promise<Match> => {
+export const reportMatchResult = async (matchId: string,
+    reportMatchResultRequest: ReportMatchResultRequest, options?: Parameters<typeof customFetch>[1]): Promise<Match> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -248,12 +251,12 @@ export const settleMatch = async (matchId: string,
     }
     return headers;
   };
-return customFetch<Match>(getSettleMatchUrl(matchId),
+return customFetch<Match>(getReportMatchResultUrl(matchId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(matchResultRequest)
+    body: JSON.stringify(reportMatchResultRequest)
   }
 );}
 
@@ -261,13 +264,13 @@ return customFetch<Match>(getSettleMatchUrl(matchId),
 
 
 
-export const getSettleMatchMutationKey = () => ['settleMatch'] as const;
+export const getReportMatchResultMutationKey = () => ['reportMatchResult'] as const;
 
-export const getSettleMatchMutationOptions = <TError = ErrorType<BadRequestResponse | Error | NotFoundResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof settleMatch>>, TError,SettleMatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof settleMatch>>, TError,SettleMatchMutationVariables, TContext> => {
+export const getReportMatchResultMutationOptions = <TError = ErrorType<BadRequestResponse | Error | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportMatchResult>>, TError,ReportMatchResultMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reportMatchResult>>, TError,ReportMatchResultMutationVariables, TContext> => {
 
-const mutationKey = getSettleMatchMutationKey();
+const mutationKey = getReportMatchResultMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -277,10 +280,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof settleMatch>>, SettleMatchMutationVariables> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reportMatchResult>>, ReportMatchResultMutationVariables> = (props) => {
           const {matchId,data} = props ?? {};
 
-          return  settleMatch(matchId,data,requestOptions)
+          return  reportMatchResult(matchId,data,requestOptions)
         }
 
 
@@ -290,23 +293,277 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type SettleMatchMutationResult = NonNullable<Awaited<ReturnType<typeof settleMatch>>>
-    export type SettleMatchMutationBody = BodyType<MatchResultRequest>
-    export type SettleMatchMutationError = ErrorType<BadRequestResponse | Error | NotFoundResponse>
-    export type SettleMatchMutationVariables = {matchId: string;data: BodyType<MatchResultRequest>}
+    export type ReportMatchResultMutationResult = NonNullable<Awaited<ReturnType<typeof reportMatchResult>>>
+    export type ReportMatchResultMutationBody = BodyType<ReportMatchResultRequest>
+    export type ReportMatchResultMutationError = ErrorType<BadRequestResponse | Error | NotFoundResponse>
+    export type ReportMatchResultMutationVariables = {matchId: string;data: BodyType<ReportMatchResultRequest>}
 
     /**
- * @summary Record a completed match result and score predictions
+ * @summary Report a provisional match result
  */
-export const useSettleMatch = <TError = ErrorType<BadRequestResponse | Error | NotFoundResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof settleMatch>>, TError,SettleMatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useReportMatchResult = <TError = ErrorType<BadRequestResponse | Error | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportMatchResult>>, TError,ReportMatchResultMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof settleMatch>>,
+        Awaited<ReturnType<typeof reportMatchResult>>,
         TError,
-        SettleMatchMutationVariables,
+        ReportMatchResultMutationVariables,
         TContext
       > => {
-      return useMutation(getSettleMatchMutationOptions(options));
+      return useMutation(getReportMatchResultMutationOptions(options));
+    }
+
+export const getConfirmMatchResultUrl = (matchId: string,) => {
+
+
+
+
+  return `/api/matches/${matchId}/confirm-result`
+}
+
+/**
+ * @summary Confirm a provisional match result
+ */
+export const confirmMatchResult = async (matchId: string,
+    confirmMatchResultRequest: ConfirmMatchResultRequest, options?: Parameters<typeof customFetch>[1]): Promise<Match> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Match>(getConfirmMatchResultUrl(matchId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(confirmMatchResultRequest)
+  }
+);}
+
+
+
+
+
+export const getConfirmMatchResultMutationKey = () => ['confirmMatchResult'] as const;
+
+export const getConfirmMatchResultMutationOptions = <TError = ErrorType<BadRequestResponse | Error | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmMatchResult>>, TError,ConfirmMatchResultMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmMatchResult>>, TError,ConfirmMatchResultMutationVariables, TContext> => {
+
+const mutationKey = getConfirmMatchResultMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmMatchResult>>, ConfirmMatchResultMutationVariables> = (props) => {
+          const {matchId,data} = props ?? {};
+
+          return  confirmMatchResult(matchId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmMatchResultMutationResult = NonNullable<Awaited<ReturnType<typeof confirmMatchResult>>>
+    export type ConfirmMatchResultMutationBody = BodyType<ConfirmMatchResultRequest>
+    export type ConfirmMatchResultMutationError = ErrorType<BadRequestResponse | Error | NotFoundResponse>
+    export type ConfirmMatchResultMutationVariables = {matchId: string;data: BodyType<ConfirmMatchResultRequest>}
+
+    /**
+ * @summary Confirm a provisional match result
+ */
+export const useConfirmMatchResult = <TError = ErrorType<BadRequestResponse | Error | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmMatchResult>>, TError,ConfirmMatchResultMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmMatchResult>>,
+        TError,
+        ConfirmMatchResultMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConfirmMatchResultMutationOptions(options));
+    }
+
+export const getListPlayersUrl = () => {
+
+
+
+
+  return `/api/players`
+}
+
+/**
+ * @summary List registered DLS players
+ */
+export const listPlayers = async ( options?: Parameters<typeof customFetch>[1]): Promise<RegisteredPlayer[]> => {
+
+  return customFetch<RegisteredPlayer[]>(getListPlayersUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPlayersQueryKey = () => {
+    return [
+    `/api/players`
+    ] as const;
+    }
+
+
+export const getListPlayersQueryOptions = <TData = Awaited<ReturnType<typeof listPlayers>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPlayers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPlayersQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPlayers>>> = ({ signal }) => listPlayers({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPlayers>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPlayersQueryResult = NonNullable<Awaited<ReturnType<typeof listPlayers>>>
+export type ListPlayersQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List registered DLS players
+ */
+
+export function useListPlayers<TData = Awaited<ReturnType<typeof listPlayers>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPlayers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPlayersQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRegisterPlayerUrl = () => {
+
+
+
+
+  return `/api/players`
+}
+
+/**
+ * @summary Register a DLS player username
+ */
+export const registerPlayer = async (registerPlayerRequest: RegisterPlayerRequest, options?: Parameters<typeof customFetch>[1]): Promise<RegisteredPlayer> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<RegisteredPlayer>(getRegisterPlayerUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(registerPlayerRequest)
+  }
+);}
+
+
+
+
+
+export const getRegisterPlayerMutationKey = () => ['registerPlayer'] as const;
+
+export const getRegisterPlayerMutationOptions = <TError = ErrorType<BadRequestResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerPlayer>>, TError,RegisterPlayerMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerPlayer>>, TError,RegisterPlayerMutationVariables, TContext> => {
+
+const mutationKey = getRegisterPlayerMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerPlayer>>, RegisterPlayerMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  registerPlayer(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterPlayerMutationResult = NonNullable<Awaited<ReturnType<typeof registerPlayer>>>
+    export type RegisterPlayerMutationBody = BodyType<RegisterPlayerRequest>
+    export type RegisterPlayerMutationError = ErrorType<BadRequestResponse>
+    export type RegisterPlayerMutationVariables = {data: BodyType<RegisterPlayerRequest>}
+
+    /**
+ * @summary Register a DLS player username
+ */
+export const useRegisterPlayer = <TError = ErrorType<BadRequestResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerPlayer>>, TError,RegisterPlayerMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerPlayer>>,
+        TError,
+        RegisterPlayerMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRegisterPlayerMutationOptions(options));
     }
 
 export const getCreateMatchUrl = (roomCode: string,) => {

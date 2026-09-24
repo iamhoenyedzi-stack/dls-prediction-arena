@@ -1,6 +1,8 @@
 import { randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { Router, type IRouter, type Response } from "express";
 import {
+  ConfirmMatchResultBody,
+  ConfirmMatchResultParams,
   CreateMatchBody,
   CreateMatchParams,
   CreateRoomBody,
@@ -8,9 +10,13 @@ import {
   GetRoomParams,
   JoinRoomBody,
   JoinRoomParams,
+  ListPlayersResponse,
   ListMatchesResponse,
   ListRoomsResponse,
-  SettleMatchBody,
+  RegisterPlayerBody,
+  RegisterPlayerResponse,
+  ReportMatchResultBody,
+  ReportMatchResultParams,
   SubmitPredictionBody,
   SubmitPredictionParams,
 } from "@workspace/api-zod";
@@ -130,22 +136,104 @@ const serializeMatch = (
   };
 
   return {
-  id: match.id,
-  playerAName: match.homeTeam,
-  playerBName: match.awayTeam,
-  scheduledAt: match.kickoffAt,
-  status: match.status as "scheduled" | "live" | "finished",
-  playerAOdds: match.homeOdds,
-  drawOdds: match.drawOdds,
-  playerBOdds: match.awayOdds,
-  result:
-    match.result === "a" || match.result === "draw" || match.result === "b"
-      ? match.result
-      : null,
-  creatorPlayerId: match.createdBy,
-  playerARecord,
-  playerBRecord,
+    id: match.id,
+    playerAId: match.playerAId,
+    playerBId: match.playerBId,
+    playerAName: match.homeTeam,
+    playerBName: match.awayTeam,
+    scheduledAt: match.kickoffAt,
+    status: match.status as "scheduled" | "live" | "finished",
+    playerAOdds: match.homeOdds,
+    drawOdds: match.drawOdds,
+    playerBOdds: match.awayOdds,
+    result:
+      match.result === "a" || match.result === "draw" || match.result === "b"
+        ? match.result
+        : null,
+    resultReported:
+      match.resultReported === "a" ||
+      match.resultReported === "draw" ||
+      match.resultReported === "b"
+        ? match.resultReported
+        : null,
+    playerAConfirmed: match.playerAConfirmed,
+    playerBConfirmed: match.playerBConfirmed,
+    creatorPlayerId: match.createdBy,
+    playerARecord,
+    playerBRecord,
   };
+};
+
+const getRegisteredPlayers = async () => {
+  const records = await getPlayerRecords();
+  const players = await db
+    .select()
+    .from(playersTable)
+    .orderBy(asc(playersTable.name));
+
+  return players.map((player) => ({
+    id: player.id,
+    dlsUsername: player.name,
+    wins: records.get(playerKey(player.name))?.wins ?? 0,
+    losses: records.get(playerKey(player.name))?.losses ?? 0,
+    createdAt: player.createdAt,
+  }));
+};
+
+const settleConfirmedMatch = async (
+  match: typeof matchesTable.$inferSelect,
+  result: Outcome,
+) => {
+  const homeScore = result === "a" ? 1 : 0;
+  const awayScore = result === "b" ? 1 : 0;
+  const [updated] = await db
+    .update(matchesTable)
+    .set({
+      status: "finished",
+      result,
+      homeScore,
+      awayScore,
+    })
+    .where(eq(matchesTable.id, match.id))
+    .returning();
+
+  const predictions = await db
+    .select()
+    .from(predictionsTable)
+    .where(eq(predictionsTable.matchId, match.id));
+  const roomIds = new Set<string>();
+
+  for (const prediction of predictions) {
+    roomIds.add(prediction.roomId);
+    await db
+      .update(predictionsTable)
+      .set({
+        points:
+          (prediction.outcome === "home"
+            ? "a"
+            : prediction.outcome === "away"
+              ? "b"
+              : prediction.outcome) === result
+            ? Math.round(prediction.odds * 10)
+            : 0,
+      })
+      .where(eq(predictionsTable.id, prediction.id));
+  }
+
+  if (roomIds.size) {
+    for (const room of await db
+      .select({ id: roomsTable.id, code: roomsTable.code })
+      .from(roomsTable)
+      .where(inArray(roomsTable.id, [...roomIds]))) {
+      const records = await getPlayerRecords(room.id);
+      publish(room.code, "match_settled", serializeMatch(updated, records));
+      publish(room.code, "leaderboard_updated", {
+        leaderboard: await getLeaderboard(room.id),
+      });
+    }
+  }
+
+  return updated;
 };
 
 const getRoom = async (code: string) => {
@@ -213,9 +301,60 @@ router.get("/matches", async (_req, res) => {
   res.json(ListMatchesResponse.parse(matches.map((match) => serializeMatch(match, records))));
 });
 
+router.get("/players", async (_req, res) => {
+  res.json(ListPlayersResponse.parse(await getRegisteredPlayers()));
+});
+
+router.post("/players", async (req, res) => {
+  const parsed = RegisterPlayerBody.safeParse(req.body);
+  if (!parsed.success) return error(res, 400, "Enter a valid DLS username");
+
+  const dlsUsername = parsed.data.dlsUsername.trim();
+  const existing = (
+    await db
+      .select()
+      .from(playersTable)
+      .where(sql`lower(${playersTable.name}) = lower(${dlsUsername})`)
+      .limit(1)
+  )[0];
+
+  if (existing) {
+    const records = await getPlayerRecords();
+    return res.json(
+      RegisterPlayerResponse.parse({
+        id: existing.id,
+        dlsUsername: existing.name,
+        wins: records.get(playerKey(existing.name))?.wins ?? 0,
+        losses: records.get(playerKey(existing.name))?.losses ?? 0,
+        createdAt: existing.createdAt,
+      }),
+    );
+  }
+
+  const [player] = await db
+    .insert(playersTable)
+    .values({
+      id: `player_${randomUUID()}`,
+      name: dlsUsername,
+    })
+    .returning();
+  return res.status(201).json(
+    RegisterPlayerResponse.parse({
+      id: player.id,
+      dlsUsername: player.name,
+      wins: 0,
+      losses: 0,
+      createdAt: player.createdAt,
+    }),
+  );
+});
+
 router.put("/matches/:matchId/result", async (req, res) => {
-  const parsed = SettleMatchBody.safeParse(req.body);
-  if (!parsed.success) return error(res, 400, "Invalid match result");
+  const params = ReportMatchResultParams.safeParse(req.params);
+  const parsed = ReportMatchResultBody.safeParse(req.body);
+  if (!params.success || !parsed.success) {
+    return error(res, 400, "Invalid reported result");
+  }
 
   const configuredKey = process.env.GAME_ADMIN_KEY ?? process.env.SESSION_SECRET;
   const providedKey = req.get("x-admin-key") ?? "";
@@ -229,7 +368,7 @@ router.put("/matches/:matchId/result", async (req, res) => {
   const matches = await db
     .select()
     .from(matchesTable)
-    .where(eq(matchesTable.id, req.params.matchId))
+    .where(eq(matchesTable.id, params.data.matchId))
     .limit(1);
   const match = matches[0];
   if (!match) return error(res, 404, "Match not found");
@@ -244,63 +383,96 @@ router.put("/matches/:matchId/result", async (req, res) => {
           .limit(1)
       )[0]
     : undefined;
-  const creatorAuthorized = Boolean(
-    room &&
-      (match.createdBy === parsed.data.actorPlayerId ||
-        room.hostPlayerId === parsed.data.actorPlayerId),
+  const participantAuthorized = Boolean(
+    match.playerAId === parsed.data.actorPlayerId ||
+      match.playerBId === parsed.data.actorPlayerId,
   );
-  if (!adminAuthorized && !creatorAuthorized) {
-    return error(res, 403, "Only the challenge creator, room host, or moderator can settle this match");
+  const moderatorAuthorized = Boolean(
+    room &&
+      room.hostPlayerId === parsed.data.actorPlayerId,
+  );
+  if (!adminAuthorized && !participantAuthorized && !moderatorAuthorized) {
+    return error(res, 403, "Only a challenged player or moderator can report this result");
   }
   if (match.kickoffAt > new Date()) {
     return error(res, 409, "This match has not reached its scheduled time");
   }
 
   const result = parsed.data.result as Outcome;
-  const homeScore = result === "a" ? 1 : 0;
-  const awayScore = result === "b" ? 1 : 0;
+  if (match.resultReported && match.resultReported !== result) {
+    return error(res, 409, "A different result has already been reported");
+  }
 
   const [updated] = await db
     .update(matchesTable)
-    .set({ status: "finished", result, homeScore, awayScore })
+    .set({ resultReported: result })
     .where(eq(matchesTable.id, match.id))
     .returning();
 
-  const predictions = await db
-    .select()
-    .from(predictionsTable)
-    .where(eq(predictionsTable.matchId, match.id));
-  const roomIds = new Set<string>();
+  const records = await getPlayerRecords(match.roomId ?? undefined);
+  if (match.roomId) {
+    const roomRows = await db
+      .select({ code: roomsTable.code })
+      .from(roomsTable)
+      .where(eq(roomsTable.id, match.roomId))
+      .limit(1);
+    if (roomRows[0]) {
+      publish(roomRows[0].code, "match_result_reported", serializeMatch(updated, records));
+    }
+  }
+  return res.json(serializeMatch(updated, records));
+});
 
-  for (const prediction of predictions) {
-    roomIds.add(prediction.roomId);
-    await db
-      .update(predictionsTable)
-      .set({
-        points:
-          (prediction.outcome === "home" ? "a" : prediction.outcome === "away" ? "b" : prediction.outcome) === result
-            ? Math.round(prediction.odds * 10)
-            : 0,
-      })
-      .where(eq(predictionsTable.id, prediction.id));
+router.put("/matches/:matchId/confirm-result", async (req, res) => {
+  const params = ConfirmMatchResultParams.safeParse(req.params);
+  const parsed = ConfirmMatchResultBody.safeParse(req.body);
+  if (!params.success || !parsed.success) {
+    return error(res, 400, "Invalid result confirmation");
   }
 
-  if (roomIds.size) {
+  const matches = await db
+    .select()
+    .from(matchesTable)
+    .where(eq(matchesTable.id, params.data.matchId))
+    .limit(1);
+  const match = matches[0];
+  if (!match) return error(res, 404, "Match not found");
+  if (match.status === "finished") return error(res, 409, "Match is already settled");
+  if (!match.resultReported) {
+    return error(res, 409, "Report the result before confirming it");
+  }
+
+  const actorId = parsed.data.actorPlayerId;
+  const isPlayerA = match.playerAId === actorId;
+  const isPlayerB = match.playerBId === actorId;
+  if (!isPlayerA && !isPlayerB) {
+    return error(res, 403, "Only the two challenged players can confirm this result");
+  }
+
+  const [updated] = await db
+    .update(matchesTable)
+    .set(isPlayerA ? { playerAConfirmed: true } : { playerBConfirmed: true })
+    .where(eq(matchesTable.id, match.id))
+    .returning();
+
+  const finalMatch =
+    updated.playerAConfirmed && updated.playerBConfirmed
+      ? await settleConfirmedMatch(updated, updated.resultReported as Outcome)
+      : updated;
+  const records = await getPlayerRecords(finalMatch.roomId ?? undefined);
+
+  if (finalMatch.roomId && finalMatch.status !== "finished") {
     const roomRows = await db
-      .select({ id: roomsTable.id, code: roomsTable.code })
+      .select({ code: roomsTable.code })
       .from(roomsTable)
-      .where(inArray(roomsTable.id, [...roomIds]));
-    for (const room of roomRows) {
-      const records = await getPlayerRecords(room.id);
-      publish(room.code, "match_settled", serializeMatch(updated, records));
-      publish(room.code, "leaderboard_updated", {
-        leaderboard: await getLeaderboard(room.id),
-      });
+      .where(eq(roomsTable.id, finalMatch.roomId))
+      .limit(1);
+    if (roomRows[0]) {
+      publish(roomRows[0].code, "match_confirmation_updated", serializeMatch(finalMatch, records));
     }
   }
 
-  const records = await getPlayerRecords(match.roomId ?? undefined);
-  return res.json(serializeMatch(updated, records));
+  return res.json(serializeMatch(finalMatch, records));
 });
 
 router.post("/rooms/:roomCode/matches", async (req, res) => {
@@ -326,21 +498,33 @@ router.post("/rooms/:roomCode/matches", async (req, res) => {
     .limit(1);
   if (!membership[0]) return error(res, 409, "Join the room before creating a challenge");
 
-  const playerAName = body.data.playerAName.trim();
-  const playerBName = body.data.playerBName.trim();
-  if (playerKey(playerAName) === playerKey(playerBName)) {
-    return error(res, 400, "Player A and Player B must be different");
+  const players = await db
+    .select()
+    .from(playersTable)
+    .where(
+      inArray(playersTable.id, [
+        body.data.creatorPlayerId,
+        body.data.opponentPlayerId,
+      ]),
+    );
+  const playerA = players.find((player) => player.id === body.data.creatorPlayerId);
+  const playerB = players.find((player) => player.id === body.data.opponentPlayerId);
+  if (!playerA || !playerB) {
+    return error(res, 404, "Both challenge players must be registered");
+  }
+  if (playerA.id === playerB.id) {
+    return error(res, 400, "Choose another registered player for the challenge");
   }
   if (body.data.scheduledAt <= new Date()) {
     return error(res, 400, "Scheduled time must be in the future");
   }
 
-  const records = await getPlayerRecords(room.id);
-  const playerARecord = records.get(playerKey(playerAName)) ?? {
+  const records = await getPlayerRecords();
+  const playerARecord = records.get(playerKey(playerA.name)) ?? {
     wins: 0,
     losses: 0,
   };
-  const playerBRecord = records.get(playerKey(playerBName)) ?? {
+  const playerBRecord = records.get(playerKey(playerB.name)) ?? {
     wins: 0,
     losses: 0,
   };
@@ -350,14 +534,19 @@ router.post("/rooms/:roomCode/matches", async (req, res) => {
     .values({
       roomId: room.id,
       createdBy: body.data.creatorPlayerId,
-      homeTeam: playerAName,
-      awayTeam: playerBName,
+      playerAId: playerA.id,
+      playerBId: playerB.id,
+      homeTeam: playerA.name,
+      awayTeam: playerB.name,
       kickoffAt: body.data.scheduledAt,
       status: "scheduled",
       homeOdds: odds.playerAOdds,
       drawOdds: odds.drawOdds,
       awayOdds: odds.playerBOdds,
       result: null,
+      resultReported: null,
+      playerAConfirmed: false,
+      playerBConfirmed: false,
     })
     .returning();
 
@@ -490,14 +679,16 @@ router.post("/rooms/:roomCode/players", async (req, res) => {
     return error(res, 409, "Room is full");
   }
 
-  const [player] = await db
-    .insert(playersTable)
-    .values({ id: body.data.playerId, name: body.data.name })
-    .onConflictDoUpdate({
-      target: playersTable.id,
-      set: { name: body.data.name },
-    })
-    .returning();
+  const player = (
+    await db
+      .select()
+      .from(playersTable)
+      .where(eq(playersTable.id, body.data.playerId))
+      .limit(1)
+  )[0];
+  if (!player) {
+    return error(res, 404, "Register your DLS username before joining a room");
+  }
   await db
     .insert(roomPlayersTable)
     .values({ roomId: room.id, playerId: player.id })

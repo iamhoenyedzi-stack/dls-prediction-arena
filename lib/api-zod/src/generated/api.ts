@@ -32,6 +32,8 @@ export const listMatchesResponsePlayerBRecordLossesMin = 0;
 
 export const ListMatchesResponseItem = zod.object({
   "id": zod.string(),
+  "playerAId": zod.string().nullish(),
+  "playerBId": zod.string().nullish(),
   "playerAName": zod.string(),
   "playerBName": zod.string(),
   "scheduledAt": zod.coerce.date(),
@@ -40,6 +42,9 @@ export const ListMatchesResponseItem = zod.object({
   "drawOdds": zod.number(),
   "playerBOdds": zod.number(),
   "result": zod.enum(['a', 'draw', 'b']).nullish(),
+  "resultReported": zod.enum(['a', 'draw', 'b']).nullish(),
+  "playerAConfirmed": zod.boolean(),
+  "playerBConfirmed": zod.boolean(),
   "creatorPlayerId": zod.string().nullish(),
   "playerARecord": zod.object({
   "wins": zod.number().int().min(listMatchesResponsePlayerARecordWinsMin),
@@ -54,38 +59,36 @@ export const ListMatchesResponse = zod.array(ListMatchesResponseItem)
 
 
 /**
- * @summary Record a completed match result and score predictions
+ * @summary Report a provisional match result
  */
-export const SettleMatchParams = zod.object({
+export const ReportMatchResultParams = zod.object({
   "matchId": zod.coerce.string()
 })
 
-export const SettleMatchHeader = zod.object({
-  "X-Admin-Key": zod.string()
-})
-
-export const settleMatchBodyActorPlayerIdMin = 3;
-export const settleMatchBodyActorPlayerIdMax = 64;
+export const reportMatchResultBodyActorPlayerIdMin = 3;
+export const reportMatchResultBodyActorPlayerIdMax = 64;
 
 
 
-export const SettleMatchBody = zod.object({
-  "actorPlayerId": zod.string().min(settleMatchBodyActorPlayerIdMin).max(settleMatchBodyActorPlayerIdMax),
+export const ReportMatchResultBody = zod.object({
+  "actorPlayerId": zod.string().min(reportMatchResultBodyActorPlayerIdMin).max(reportMatchResultBodyActorPlayerIdMax),
   "result": zod.enum(['a', 'draw', 'b'])
 })
 
-export const settleMatchResponsePlayerARecordWinsMin = 0;
+export const reportMatchResultResponsePlayerARecordWinsMin = 0;
 
-export const settleMatchResponsePlayerARecordLossesMin = 0;
+export const reportMatchResultResponsePlayerARecordLossesMin = 0;
 
-export const settleMatchResponsePlayerBRecordWinsMin = 0;
+export const reportMatchResultResponsePlayerBRecordWinsMin = 0;
 
-export const settleMatchResponsePlayerBRecordLossesMin = 0;
+export const reportMatchResultResponsePlayerBRecordLossesMin = 0;
 
 
 
-export const SettleMatchResponse = zod.object({
+export const ReportMatchResultResponse = zod.object({
   "id": zod.string(),
+  "playerAId": zod.string().nullish(),
+  "playerBId": zod.string().nullish(),
   "playerAName": zod.string(),
   "playerBName": zod.string(),
   "scheduledAt": zod.coerce.date(),
@@ -94,15 +97,117 @@ export const SettleMatchResponse = zod.object({
   "drawOdds": zod.number(),
   "playerBOdds": zod.number(),
   "result": zod.enum(['a', 'draw', 'b']).nullish(),
+  "resultReported": zod.enum(['a', 'draw', 'b']).nullish(),
+  "playerAConfirmed": zod.boolean(),
+  "playerBConfirmed": zod.boolean(),
   "creatorPlayerId": zod.string().nullish(),
   "playerARecord": zod.object({
-  "wins": zod.number().int().min(settleMatchResponsePlayerARecordWinsMin),
-  "losses": zod.number().int().min(settleMatchResponsePlayerARecordLossesMin)
+  "wins": zod.number().int().min(reportMatchResultResponsePlayerARecordWinsMin),
+  "losses": zod.number().int().min(reportMatchResultResponsePlayerARecordLossesMin)
 }),
   "playerBRecord": zod.object({
-  "wins": zod.number().int().min(settleMatchResponsePlayerBRecordWinsMin),
-  "losses": zod.number().int().min(settleMatchResponsePlayerBRecordLossesMin)
+  "wins": zod.number().int().min(reportMatchResultResponsePlayerBRecordWinsMin),
+  "losses": zod.number().int().min(reportMatchResultResponsePlayerBRecordLossesMin)
 })
+})
+
+
+/**
+ * @summary Confirm a provisional match result
+ */
+export const ConfirmMatchResultParams = zod.object({
+  "matchId": zod.coerce.string()
+})
+
+export const confirmMatchResultBodyActorPlayerIdMin = 3;
+export const confirmMatchResultBodyActorPlayerIdMax = 64;
+
+
+
+export const ConfirmMatchResultBody = zod.object({
+  "actorPlayerId": zod.string().min(confirmMatchResultBodyActorPlayerIdMin).max(confirmMatchResultBodyActorPlayerIdMax)
+})
+
+export const confirmMatchResultResponsePlayerARecordWinsMin = 0;
+
+export const confirmMatchResultResponsePlayerARecordLossesMin = 0;
+
+export const confirmMatchResultResponsePlayerBRecordWinsMin = 0;
+
+export const confirmMatchResultResponsePlayerBRecordLossesMin = 0;
+
+
+
+export const ConfirmMatchResultResponse = zod.object({
+  "id": zod.string(),
+  "playerAId": zod.string().nullish(),
+  "playerBId": zod.string().nullish(),
+  "playerAName": zod.string(),
+  "playerBName": zod.string(),
+  "scheduledAt": zod.coerce.date(),
+  "status": zod.enum(['scheduled', 'live', 'finished']),
+  "playerAOdds": zod.number(),
+  "drawOdds": zod.number(),
+  "playerBOdds": zod.number(),
+  "result": zod.enum(['a', 'draw', 'b']).nullish(),
+  "resultReported": zod.enum(['a', 'draw', 'b']).nullish(),
+  "playerAConfirmed": zod.boolean(),
+  "playerBConfirmed": zod.boolean(),
+  "creatorPlayerId": zod.string().nullish(),
+  "playerARecord": zod.object({
+  "wins": zod.number().int().min(confirmMatchResultResponsePlayerARecordWinsMin),
+  "losses": zod.number().int().min(confirmMatchResultResponsePlayerARecordLossesMin)
+}),
+  "playerBRecord": zod.object({
+  "wins": zod.number().int().min(confirmMatchResultResponsePlayerBRecordWinsMin),
+  "losses": zod.number().int().min(confirmMatchResultResponsePlayerBRecordLossesMin)
+})
+})
+
+
+/**
+ * @summary List registered DLS players
+ */
+export const listPlayersResponseWinsMin = 0;
+
+export const listPlayersResponseLossesMin = 0;
+
+
+
+export const ListPlayersResponseItem = zod.object({
+  "id": zod.string(),
+  "dlsUsername": zod.string(),
+  "wins": zod.number().int().min(listPlayersResponseWinsMin),
+  "losses": zod.number().int().min(listPlayersResponseLossesMin),
+  "createdAt": zod.coerce.date()
+})
+export const ListPlayersResponse = zod.array(ListPlayersResponseItem)
+
+
+/**
+ * @summary Register a DLS player username
+ */
+export const registerPlayerBodyDlsUsernameMin = 2;
+export const registerPlayerBodyDlsUsernameMax = 24;
+
+
+
+export const RegisterPlayerBody = zod.object({
+  "dlsUsername": zod.string().min(registerPlayerBodyDlsUsernameMin).max(registerPlayerBodyDlsUsernameMax)
+})
+
+export const registerPlayerResponseWinsMin = 0;
+
+export const registerPlayerResponseLossesMin = 0;
+
+
+
+export const RegisterPlayerResponse = zod.object({
+  "id": zod.string(),
+  "dlsUsername": zod.string(),
+  "wins": zod.number().int().min(registerPlayerResponseWinsMin),
+  "losses": zod.number().int().min(registerPlayerResponseLossesMin),
+  "createdAt": zod.coerce.date()
 })
 
 
@@ -119,18 +224,14 @@ export const CreateMatchParams = zod.object({
 export const createMatchBodyCreatorPlayerIdMin = 3;
 export const createMatchBodyCreatorPlayerIdMax = 64;
 
-export const createMatchBodyPlayerANameMin = 2;
-export const createMatchBodyPlayerANameMax = 40;
-
-export const createMatchBodyPlayerBNameMin = 2;
-export const createMatchBodyPlayerBNameMax = 40;
+export const createMatchBodyOpponentPlayerIdMin = 3;
+export const createMatchBodyOpponentPlayerIdMax = 64;
 
 
 
 export const CreateMatchBody = zod.object({
   "creatorPlayerId": zod.string().min(createMatchBodyCreatorPlayerIdMin).max(createMatchBodyCreatorPlayerIdMax),
-  "playerAName": zod.string().min(createMatchBodyPlayerANameMin).max(createMatchBodyPlayerANameMax),
-  "playerBName": zod.string().min(createMatchBodyPlayerBNameMin).max(createMatchBodyPlayerBNameMax),
+  "opponentPlayerId": zod.string().min(createMatchBodyOpponentPlayerIdMin).max(createMatchBodyOpponentPlayerIdMax),
   "scheduledAt": zod.coerce.date()
 })
 
@@ -146,6 +247,8 @@ export const createMatchResponsePlayerBRecordLossesMin = 0;
 
 export const CreateMatchResponse = zod.object({
   "id": zod.string(),
+  "playerAId": zod.string().nullish(),
+  "playerBId": zod.string().nullish(),
   "playerAName": zod.string(),
   "playerBName": zod.string(),
   "scheduledAt": zod.coerce.date(),
@@ -154,6 +257,9 @@ export const CreateMatchResponse = zod.object({
   "drawOdds": zod.number(),
   "playerBOdds": zod.number(),
   "result": zod.enum(['a', 'draw', 'b']).nullish(),
+  "resultReported": zod.enum(['a', 'draw', 'b']).nullish(),
+  "playerAConfirmed": zod.boolean(),
+  "playerBConfirmed": zod.boolean(),
   "creatorPlayerId": zod.string().nullish(),
   "playerARecord": zod.object({
   "wins": zod.number().int().min(createMatchResponsePlayerARecordWinsMin),
@@ -250,6 +356,8 @@ export const GetRoomResponse = zod.object({
 })),
   "matches": zod.array(zod.object({
   "id": zod.string(),
+  "playerAId": zod.string().nullish(),
+  "playerBId": zod.string().nullish(),
   "playerAName": zod.string(),
   "playerBName": zod.string(),
   "scheduledAt": zod.coerce.date(),
@@ -258,6 +366,9 @@ export const GetRoomResponse = zod.object({
   "drawOdds": zod.number(),
   "playerBOdds": zod.number(),
   "result": zod.enum(['a', 'draw', 'b']).nullish(),
+  "resultReported": zod.enum(['a', 'draw', 'b']).nullish(),
+  "playerAConfirmed": zod.boolean(),
+  "playerBConfirmed": zod.boolean(),
   "creatorPlayerId": zod.string().nullish(),
   "playerARecord": zod.object({
   "wins": zod.number().int().min(getRoomResponseTwoMatchesItemPlayerARecordWinsMin),

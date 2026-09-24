@@ -7,6 +7,7 @@
  */
 
 export * from './badRequestResponse';
+export * from './confirmMatchResultRequest';
 export * from './createMatchRequest';
 export * from './createRoomRequest';
 export * from './error';
@@ -15,14 +16,17 @@ export * from './joinRoomRequest';
 export * from './leaderboardEntry';
 export * from './match';
 export * from './matchResult';
-export * from './matchResultRequest';
-export * from './matchResultRequestResult';
+export * from './matchResultReported';
 export * from './matchStatus';
 export * from './notFoundResponse';
 export * from './player';
 export * from './playerRecord';
 export * from './prediction';
 export * from './predictionOutcome';
+export * from './registeredPlayer';
+export * from './registerPlayerRequest';
+export * from './reportMatchResultRequest';
+export * from './reportMatchResultRequestResult';
 export * from './room';
 export * from './roomDetails';
 export * from './roomSummary';

@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MatchResultRequestResult = typeof MatchResultRequestResult[keyof typeof MatchResultRequestResult];
+export type ReportMatchResultRequestResult = typeof ReportMatchResultRequestResult[keyof typeof ReportMatchResultRequestResult];
 
 
-export const MatchResultRequestResult = {
+export const ReportMatchResultRequestResult = {
   a: 'a',
   draw: 'draw',
   b: 'b',

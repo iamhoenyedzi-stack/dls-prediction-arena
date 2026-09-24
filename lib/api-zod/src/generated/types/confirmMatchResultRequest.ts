@@ -6,16 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface CreateMatchRequest {
+export interface ConfirmMatchResultRequest {
   /**
      * @minLength 3
      * @maxLength 64
      */
-  creatorPlayerId: string;
-  /**
-     * @minLength 3
-     * @maxLength 64
-     */
-  opponentPlayerId: string;
-  scheduledAt: Date;
+  actorPlayerId: string;
 }

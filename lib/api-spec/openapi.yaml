@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: matches
     description: DLS fixtures and prediction outcomes
+  - name: players
+    description: Registered DLS players
   - name: rooms
     description: Multiplayer prediction rooms
 paths:
@@ -48,23 +50,19 @@ paths:
         in: path
         required: true
         schema: { type: string }
-      - name: X-Admin-Key
-        in: header
-        required: true
-        schema: { type: string }
     put:
-      operationId: settleMatch
+      operationId: reportMatchResult
       tags: [matches]
-      summary: Record a completed match result and score predictions
+      summary: Report a provisional match result
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/MatchResultRequest"
+              $ref: "#/components/schemas/ReportMatchResultRequest"
       responses:
         "200":
-          description: Match settled
+          description: Provisional result recorded
           content:
             application/json:
               schema:
@@ -72,13 +70,91 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "403":
-          description: Invalid admin key
+          description: Only the challenged players or a moderator can report a result
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "404":
           $ref: "#/components/responses/NotFound"
+  /matches/{matchId}/confirm-result:
+    parameters:
+      - name: matchId
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: confirmMatchResult
+      tags: [matches]
+      summary: Confirm a provisional match result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmMatchResultRequest"
+      responses:
+        "200":
+          description: Result confirmation recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Match"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Actor is not one of the challenged players
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A result has not been reported or the match is already settled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /players:
+    get:
+      operationId: listPlayers
+      tags: [players]
+      summary: List registered DLS players
+      responses:
+        "200":
+          description: Registered players available for challenges
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RegisteredPlayer"
+    post:
+      operationId: registerPlayer
+      tags: [players]
+      summary: Register a DLS player username
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterPlayerRequest"
+      responses:
+        "201":
+          description: Player registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisteredPlayer"
+        "200":
+          description: Existing registration returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisteredPlayer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
   /rooms/{roomCode}/matches:
     parameters:
       - $ref: "#/components/parameters/RoomCode"
@@ -284,6 +360,8 @@ components:
       type: object
       properties:
         id: { type: string }
+        playerAId: { type: string, nullable: true }
+        playerBId: { type: string, nullable: true }
         playerAName: { type: string }
         playerBName: { type: string }
         scheduledAt: { type: string, format: date-time }
@@ -297,13 +375,19 @@ components:
           type: string
           enum: [a, draw, b]
           nullable: true
+        resultReported:
+          type: string
+          enum: [a, draw, b]
+          nullable: true
+        playerAConfirmed: { type: boolean }
+        playerBConfirmed: { type: boolean }
         creatorPlayerId: { type: string, nullable: true }
         playerARecord:
           $ref: "#/components/schemas/PlayerRecord"
         playerBRecord:
           $ref: "#/components/schemas/PlayerRecord"
-      required: [id, playerAName, playerBName, scheduledAt, status, playerAOdds, drawOdds, playerBOdds, playerARecord, playerBRecord]
-    MatchResultRequest:
+      required: [id, playerAName, playerBName, scheduledAt, status, playerAOdds, drawOdds, playerBOdds, playerAConfirmed, playerBConfirmed, playerARecord, playerBRecord]
+    ReportMatchResultRequest:
       type: object
       properties:
         actorPlayerId: { type: string, minLength: 3, maxLength: 64 }
@@ -311,14 +395,32 @@ components:
           type: string
           enum: [a, draw, b]
       required: [actorPlayerId, result]
+    ConfirmMatchResultRequest:
+      type: object
+      properties:
+        actorPlayerId: { type: string, minLength: 3, maxLength: 64 }
+      required: [actorPlayerId]
+    RegisterPlayerRequest:
+      type: object
+      properties:
+        dlsUsername: { type: string, minLength: 2, maxLength: 24 }
+      required: [dlsUsername]
+    RegisteredPlayer:
+      type: object
+      properties:
+        id: { type: string }
+        dlsUsername: { type: string }
+        wins: { type: integer, minimum: 0 }
+        losses: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+      required: [id, dlsUsername, wins, losses, createdAt]
     CreateMatchRequest:
       type: object
       properties:
         creatorPlayerId: { type: string, minLength: 3, maxLength: 64 }
-        playerAName: { type: string, minLength: 2, maxLength: 40 }
-        playerBName: { type: string, minLength: 2, maxLength: 40 }
+        opponentPlayerId: { type: string, minLength: 3, maxLength: 64 }
         scheduledAt: { type: string, format: date-time }
-      required: [creatorPlayerId, playerAName, playerBName, scheduledAt]
+      required: [creatorPlayerId, opponentPlayerId, scheduledAt]
     PlayerRecord:
       type: object
       properties:

@@ -20,12 +20,16 @@ import {
 } from 'lucide-react';
 import {
   getGetLeaderboardQueryKey,
+  getListPlayersQueryKey,
   getGetRoomQueryKey,
+  useConfirmMatchResult,
   useCreateMatch,
   useGetLeaderboard,
   useGetRoom,
   useJoinRoom,
-  useSettleMatch,
+  useListPlayers,
+  useRegisterPlayer,
+  useReportMatchResult,
   useSubmitPrediction,
   type LeaderboardEntry,
   type Match,
@@ -163,6 +167,7 @@ function MatchCard({
   onSelect,
   onSubmit,
   onSettle,
+  onConfirm,
   pendingPrediction,
   pendingSettlement,
 }: {
@@ -175,19 +180,37 @@ function MatchCard({
   onSelect: (outcome: Outcome) => void;
   onSubmit: () => void;
   onSettle: (result: Outcome) => void;
+  onConfirm: () => void;
   pendingPrediction: boolean;
   pendingSettlement: boolean;
 }) {
   const finished = match.status === 'finished';
   const locked = finished || match.status === 'live' || new Date(match.scheduledAt).getTime() <= now;
-  const canSettle = Boolean(
+  const isPlayerA = currentPlayerId === match.playerAId;
+  const isPlayerB = currentPlayerId === match.playerBId;
+  const canReport = Boolean(
     currentPlayerId &&
       !finished &&
       new Date(match.scheduledAt).getTime() <= now &&
-      (currentPlayerId === match.creatorPlayerId || currentPlayerId === roomHostId),
+      !match.resultReported &&
+      (isPlayerA || isPlayerB),
   );
-  const statusLabel = finished ? 'Settled' : locked ? 'Ready to settle' : 'Open for picks';
+  const canConfirm = Boolean(
+    currentPlayerId &&
+      !finished &&
+      match.resultReported &&
+      (isPlayerA || isPlayerB) &&
+      ((isPlayerA && !match.playerAConfirmed) || (isPlayerB && !match.playerBConfirmed)),
+  );
+  const statusLabel = finished
+    ? 'Settled'
+    : match.resultReported
+      ? 'Result reported'
+      : locked
+        ? 'Ready for result'
+        : 'Open for picks';
   const resultLabel = match.result === 'a' ? `${match.playerAName} won` : match.result === 'b' ? `${match.playerBName} won` : match.result === 'draw' ? 'Draw' : '';
+  const reportedLabel = match.resultReported === 'a' ? `${match.playerAName} won` : match.resultReported === 'b' ? `${match.playerBName} won` : match.resultReported === 'draw' ? 'Draw' : '';
 
   return (
     <article
@@ -270,11 +293,11 @@ function MatchCard({
           {pendingPrediction ? 'Saving pick…' : 'Lock in prediction'}
           {!pendingPrediction ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}
         </button>
-      ) : canSettle ? (
+      ) : canReport ? (
         <div className="mt-3 rounded-xl border border-coral/20 bg-coral/[0.06] p-3">
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-coral">
             <Crown className="h-3.5 w-3.5" />
-            Mark the result
+            Report the result
           </div>
           <div className="mt-2 flex gap-2">
             <button className="flex-1 rounded-lg bg-white/[0.07] px-2 py-2 font-mono text-[10px] uppercase text-cream transition hover:bg-white/[0.13] disabled:opacity-40" disabled={pendingSettlement} onClick={() => onSettle('a')} type="button">A won</button>
@@ -282,10 +305,21 @@ function MatchCard({
             <button className="flex-1 rounded-lg bg-white/[0.07] px-2 py-2 font-mono text-[10px] uppercase text-cream transition hover:bg-white/[0.13] disabled:opacity-40" disabled={pendingSettlement} onClick={() => onSettle('b')} type="button">B won</button>
           </div>
         </div>
+      ) : canConfirm ? (
+        <div className="mt-3 rounded-xl border border-lime-300/20 bg-lime-300/[0.06] p-3">
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-lime-200">
+            <Shield className="h-3.5 w-3.5" />
+            Confirm {reportedLabel}
+          </div>
+          <button className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-lime-300 px-3 py-2 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink transition hover:bg-lime-200 disabled:opacity-40" disabled={pendingSettlement} onClick={onConfirm} type="button">
+            {pendingSettlement ? 'Confirming…' : 'Confirm result'}
+            {!pendingSettlement ? <Check className="h-3.5 w-3.5" /> : null}
+          </button>
+        </div>
       ) : (
         <div className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-white/[0.03] py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">
           <LockKeyhole className="h-3 w-3" />
-          {finished ? 'Points settled' : 'Waiting for result'}
+          {finished ? 'Points settled' : match.resultReported ? `Waiting for ${match.playerAConfirmed && !match.playerBConfirmed ? match.playerBName : match.playerAName} to confirm` : 'Waiting for both players'}
         </div>
       )}
     </article>
@@ -351,8 +385,7 @@ export default function RoomPage() {
   const [sseConnected, setSseConnected] = useState(false);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [playerAName, setPlayerAName] = useState('');
-  const [playerBName, setPlayerBName] = useState('');
+  const [selectedOpponentId, setSelectedOpponentId] = useState('');
   const [scheduledAt, setScheduledAt] = useState(nextScheduleValue);
 
   const roomQuery = useGetRoom(ROOM_CODE, {
@@ -361,10 +394,15 @@ export default function RoomPage() {
   const leaderboardQuery = useGetLeaderboard(ROOM_CODE, {
     query: { queryKey: getGetLeaderboardQueryKey(ROOM_CODE), staleTime: 15_000 },
   });
+  const playersQuery = useListPlayers({
+    query: { queryKey: getListPlayersQueryKey(), staleTime: 10_000 },
+  });
   const joinRoom = useJoinRoom();
+  const registerPlayer = useRegisterPlayer();
   const createMatch = useCreateMatch();
   const submitPrediction = useSubmitPrediction();
-  const settleMatch = useSettleMatch();
+  const reportMatchResult = useReportMatchResult();
+  const confirmMatchResult = useConfirmMatchResult();
 
   const room = roomQuery.data;
   const currentPlayer = useMemo(
@@ -374,6 +412,8 @@ export default function RoomPage() {
   const entries = leaderboardQuery.data ?? room?.leaderboard ?? [];
   const canPredict = Boolean(currentPlayer) && room?.status !== 'finished';
   const canCreateMatch = Boolean(currentPlayer) && room?.status !== 'finished';
+  const registeredPlayers = playersQuery.data ?? [];
+  const opponents = registeredPlayers.filter((player) => player.id !== identity.id);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -389,6 +429,18 @@ export default function RoomPage() {
       setSelectedByMatch({});
     }
   }, [currentPlayer]);
+
+  useEffect(() => {
+    if (!room || currentPlayer || !identity.name || joinRoom.isPending) return;
+    joinRoom.mutate(
+      { roomCode: ROOM_CODE, data: { playerId: identity.id, name: identity.name } },
+      {
+        onSuccess: () => refreshRoom(),
+        onError: (error) =>
+          setFeedback({ tone: 'error', message: getErrorMessage(error, 'Could not enter the room.') }),
+      },
+    );
+  }, [currentPlayer, identity.id, identity.name, joinRoom.isPending, room]);
 
   useEffect(() => {
     const source = new EventSource(`/api/rooms/${ROOM_CODE}/events`);
@@ -408,31 +460,40 @@ export default function RoomPage() {
     void queryClient.invalidateQueries({ queryKey: getGetLeaderboardQueryKey(ROOM_CODE) });
   };
 
-  const handleJoin = () => {
+  const handleRegister = () => {
     const cleanName = name.trim();
     if (cleanName.length < 2) {
-      setFeedback({ tone: 'error', message: 'Use at least 2 characters for your display name.' });
+      setFeedback({ tone: 'error', message: 'Use at least 2 characters for your DLS username.' });
       return;
     }
-    joinRoom.mutate(
-      { roomCode: ROOM_CODE, data: { playerId: identity.id, name: cleanName } },
+    registerPlayer.mutate(
+      { data: { dlsUsername: cleanName } },
       {
         onSuccess: (player) => {
-          const nextIdentity = { id: player.id, name: player.name };
+          const nextIdentity = { id: player.id, name: player.dlsUsername };
           setIdentity(nextIdentity);
-          setName(player.name);
+          setName(player.dlsUsername);
           window.localStorage.setItem(IDENTITY_KEY, JSON.stringify(nextIdentity));
-          setFeedback({ tone: 'success', message: `You’re in, ${player.name}. Create a challenge or make a pick.` });
-          refreshRoom();
+          joinRoom.mutate(
+            { roomCode: ROOM_CODE, data: { playerId: player.id, name: player.dlsUsername } },
+            {
+              onSuccess: () => {
+                setFeedback({ tone: 'success', message: `Registered as ${player.dlsUsername}. You can now challenge a player or make a pick.` });
+                refreshRoom();
+                void queryClient.invalidateQueries({ queryKey: getListPlayersQueryKey() });
+              },
+              onError: (error) => setFeedback({ tone: 'error', message: getErrorMessage(error, 'Registered, but could not enter the room.') }),
+            },
+          );
         },
-        onError: (error) => setFeedback({ tone: 'error', message: getErrorMessage(error, 'Could not join this room.') }),
+        onError: (error) => setFeedback({ tone: 'error', message: getErrorMessage(error, 'Could not register this username.') }),
       },
     );
   };
 
   const selectOutcome = (matchId: string, outcome: Outcome) => {
     if (!currentPlayer) {
-      setFeedback({ tone: 'info', message: 'Join the room above before making a prediction.' });
+      setFeedback({ tone: 'info', message: 'Register your DLS username before making a prediction.' });
       return;
     }
     const next = { ...selectedByMatch, [matchId]: outcome };
@@ -458,10 +519,8 @@ export default function RoomPage() {
 
   const createChallenge = () => {
     if (!currentPlayer) return;
-    const cleanA = playerAName.trim();
-    const cleanB = playerBName.trim();
-    if (cleanA.length < 2 || cleanB.length < 2) {
-      setFeedback({ tone: 'error', message: 'Enter both DLS player names.' });
+    if (!selectedOpponentId) {
+      setFeedback({ tone: 'error', message: 'Choose another registered player.' });
       return;
     }
     const parsedDate = new Date(scheduledAt);
@@ -474,15 +533,13 @@ export default function RoomPage() {
         roomCode: ROOM_CODE,
         data: {
           creatorPlayerId: currentPlayer.id,
-          playerAName: cleanA,
-          playerBName: cleanB,
+          opponentPlayerId: selectedOpponentId,
           scheduledAt: parsedDate.toISOString(),
         },
       },
       {
         onSuccess: (match) => {
-          setPlayerAName('');
-          setPlayerBName('');
+          setSelectedOpponentId('');
           setScheduledAt(nextScheduleValue());
           setFeedback({ tone: 'success', message: `${match.playerAName} v ${match.playerBName} is on the card.` });
           refreshRoom();
@@ -492,16 +549,35 @@ export default function RoomPage() {
     );
   };
 
-  const settle = (match: Match, result: Outcome) => {
+  const report = (match: Match, result: Outcome) => {
     if (!currentPlayer) return;
-    settleMatch.mutate(
+    reportMatchResult.mutate(
       { matchId: match.id, data: { actorPlayerId: currentPlayer.id, result } },
       {
         onSuccess: () => {
-          setFeedback({ tone: 'success', message: 'Result recorded. Correct predictions have been awarded points.' });
+          setFeedback({ tone: 'success', message: 'Result reported. Both players must confirm before points settle.' });
           refreshRoom();
         },
-        onError: (error) => setFeedback({ tone: 'error', message: getErrorMessage(error, 'The result could not be recorded.') }),
+        onError: (error) => setFeedback({ tone: 'error', message: getErrorMessage(error, 'The result could not be reported.') }),
+      },
+    );
+  };
+
+  const confirm = (match: Match) => {
+    if (!currentPlayer) return;
+    confirmMatchResult.mutate(
+      { matchId: match.id, data: { actorPlayerId: currentPlayer.id } },
+      {
+        onSuccess: (updatedMatch) => {
+          setFeedback({
+            tone: 'success',
+            message: updatedMatch.status === 'finished'
+              ? 'Both players confirmed. Points have settled.'
+              : 'Your confirmation is recorded. Waiting for the other player.',
+          });
+          refreshRoom();
+        },
+        onError: (error) => setFeedback({ tone: 'error', message: getErrorMessage(error, 'The result could not be confirmed.') }),
       },
     );
   };
@@ -588,19 +664,24 @@ export default function RoomPage() {
           </div>
         </section>
 
-        {!currentPlayer ? (
-          <section className="animate-sweep mt-5 rounded-[22px] border border-lime-300/20 bg-lime-300/[0.07] p-4 sm:p-5" data-testid="section-join-room">
+        {!identity.name ? (
+          <section className="animate-sweep mt-5 rounded-[22px] border border-lime-300/20 bg-lime-300/[0.07] p-4 sm:p-5" data-testid="section-register-player">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <div className="flex-1">
-                <div className="flex items-center gap-2 text-lime-300"><UserRound className="h-4 w-4" /><span className="font-mono text-[10px] uppercase tracking-[0.18em]">Join the room</span></div>
-                <label className="mt-3 block text-sm font-medium text-cream" htmlFor="display-name">Choose your display name</label>
-                <input className="mt-2 h-12 w-full rounded-xl border border-white/12 bg-ink/45 px-3.5 text-sm text-cream outline-none transition placeholder:text-slate-600 focus:border-lime-300/60 focus:ring-2 focus:ring-lime-300/10" data-testid="input-display-name" id="display-name" maxLength={24} onChange={(event) => setName(event.target.value)} placeholder="e.g. Night Shift" value={name} />
+                <div className="flex items-center gap-2 text-lime-300"><UserRound className="h-4 w-4" /><span className="font-mono text-[10px] uppercase tracking-[0.18em]">Player registration</span></div>
+                <label className="mt-3 block text-sm font-medium text-cream" htmlFor="dls-username">Register your DLS username</label>
+                <input className="mt-2 h-12 w-full rounded-xl border border-white/12 bg-ink/45 px-3.5 text-sm text-cream outline-none transition placeholder:text-slate-600 focus:border-lime-300/60 focus:ring-2 focus:ring-lime-300/10" data-testid="input-dls-username" id="dls-username" maxLength={24} onChange={(event) => setName(event.target.value)} placeholder="e.g. Night Shift" value={name} />
               </div>
-              <button className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-lime-300 px-5 font-mono text-xs font-medium uppercase tracking-[0.15em] text-ink transition hover:-translate-y-0.5 hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-join-room" disabled={joinRoom.isPending} onClick={handleJoin} type="button">
-                {joinRoom.isPending ? 'Joining…' : 'Join & predict'}{!joinRoom.isPending ? <ChevronRight className="h-4 w-4" /> : null}
+              <button className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-lime-300 px-5 font-mono text-xs font-medium uppercase tracking-[0.15em] text-ink transition hover:-translate-y-0.5 hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-register-player" disabled={registerPlayer.isPending || joinRoom.isPending} onClick={handleRegister} type="button">
+                {registerPlayer.isPending || joinRoom.isPending ? 'Registering…' : 'Register & enter'}{!registerPlayer.isPending && !joinRoom.isPending ? <ChevronRight className="h-4 w-4" /> : null}
               </button>
             </div>
-            <p className="mt-3 font-mono text-[10px] leading-5 text-slate-500">Your name and player key stay on this device so reloads keep your seat.</p>
+            <p className="mt-3 font-mono text-[10px] leading-5 text-slate-500">Your registered username is stored in the player database. You will enter room {ROOM_CODE} automatically.</p>
+          </section>
+        ) : !currentPlayer ? (
+          <section className="mt-5 flex items-center gap-3 rounded-[20px] border border-white/8 bg-white/[0.035] px-4 py-3" data-testid="section-entering-room">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-lime-300" />
+            <div><p className="text-sm font-semibold text-cream">Entering room as {identity.name}</p><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-slate-500">Restoring your registered player seat</p></div>
           </section>
         ) : (
           <section className="mt-5 flex items-center justify-between gap-3 rounded-[20px] border border-white/8 bg-white/[0.035] px-4 py-3" data-testid="section-current-player">
@@ -612,14 +693,14 @@ export default function RoomPage() {
         {currentPlayer && canCreateMatch ? (
           <section className="mt-4 rounded-[22px] border border-coral/20 bg-coral/[0.06] p-4 sm:p-5" data-testid="section-create-match">
             <div className="flex items-center gap-2 text-coral"><CalendarPlus className="h-4 w-4" /><span className="font-mono text-[10px] uppercase tracking-[0.18em]">Create a DLS challenge</span></div>
-            <p className="mt-2 text-sm leading-6 text-slate-400">Add the two real players and when they are scheduled to play. Your room role lets you record the result later.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">Challenge another registered player and set the scheduled time. Both challenged players must confirm the result before points settle.</p>
             <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_220px_auto] md:items-end">
-              <div><label className="font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500" htmlFor="player-a-name">Player A</label><input className="mt-2 h-11 w-full rounded-xl border border-white/12 bg-ink/45 px-3 text-sm text-cream outline-none placeholder:text-slate-600 focus:border-coral/60" data-testid="input-player-a-name" id="player-a-name" maxLength={40} onChange={(event) => setPlayerAName(event.target.value)} placeholder="e.g. Kwame Ice Mensah" value={playerAName} /></div>
-              <div><label className="font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500" htmlFor="player-b-name">Player B</label><input className="mt-2 h-11 w-full rounded-xl border border-white/12 bg-ink/45 px-3 text-sm text-cream outline-none placeholder:text-slate-600 focus:border-coral/60" data-testid="input-player-b-name" id="player-b-name" maxLength={40} onChange={(event) => setPlayerBName(event.target.value)} placeholder="e.g. Yaw The Wall Boateng" value={playerBName} /></div>
+              <div><label className="font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500" htmlFor="player-a-name">Player A</label><div className="mt-2 flex h-11 items-center rounded-xl border border-white/12 bg-ink/45 px-3 text-sm text-cream">{identity.name}<span className="ml-auto font-mono text-[9px] uppercase tracking-[0.12em] text-lime-300">You</span></div></div>
+              <div><label className="font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500" htmlFor="opponent-player">Player B</label><select className="mt-2 h-11 w-full rounded-xl border border-white/12 bg-ink/45 px-3 text-sm text-cream outline-none focus:border-coral/60" data-testid="select-opponent-player" id="opponent-player" onChange={(event) => setSelectedOpponentId(event.target.value)} value={selectedOpponentId}><option value="">Choose a registered player</option>{opponents.map((player) => <option key={player.id} value={player.id}>{player.dlsUsername} · {player.wins}W/{player.losses}L</option>)}</select></div>
               <div><label className="font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500" htmlFor="scheduled-at">Scheduled time</label><input className="mt-2 h-11 w-full rounded-xl border border-white/12 bg-ink/45 px-3 text-sm text-cream outline-none focus:border-coral/60" data-testid="input-scheduled-at" id="scheduled-at" min={nextScheduleValue()} onChange={(event) => setScheduledAt(event.target.value)} type="datetime-local" value={scheduledAt} /></div>
               <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-coral px-4 font-mono text-[10px] font-medium uppercase tracking-[0.13em] text-ink transition hover:bg-orange-300 disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-create-match" disabled={createMatch.isPending} onClick={createChallenge} type="button">{createMatch.isPending ? 'Adding…' : 'Add challenge'}<ChevronRight className="h-4 w-4" /></button>
             </div>
-            <p className="mt-3 font-mono text-[10px] leading-5 text-slate-500">Odds use each player’s settled wins and losses in this room. A correct pick earns points; no money is involved.</p>
+             <p className="mt-3 font-mono text-[10px] leading-5 text-slate-500">Odds use each registered player’s settled win/loss record. A correct pick earns points; no money is involved.</p>
           </section>
         ) : null}
 
@@ -636,7 +717,7 @@ export default function RoomPage() {
               <div className="rounded-[22px] border border-dashed border-white/12 bg-white/[0.025] p-8 text-center" data-testid="empty-fixtures"><Clipboard className="mx-auto h-7 w-7 text-slate-500" /><p className="mt-3 text-sm font-medium text-slate-300">No player challenges yet.</p><p className="mt-1 text-xs text-slate-500">Join the room and add the first Player A v Player B matchup.</p></div>
             ) : (
               <div className="space-y-3">
-                {room.matches.map((match) => <MatchCard canPredict={canPredict} currentPlayerId={currentPlayer?.id} key={match.id} match={match} now={now} onSelect={(outcome) => selectOutcome(match.id, outcome)} onSettle={(result) => settle(match, result)} onSubmit={() => submitForMatch(match)} pendingPrediction={submitPrediction.isPending && submitPrediction.variables?.data.matchId === match.id} pendingSettlement={settleMatch.isPending && settleMatch.variables?.matchId === match.id} roomHostId={room.hostPlayerId} selectedOutcome={selectedByMatch[match.id]} />)}
+                 {room.matches.map((match) => <MatchCard canPredict={canPredict} currentPlayerId={currentPlayer?.id} key={match.id} match={match} now={now} onConfirm={() => confirm(match)} onSelect={(outcome) => selectOutcome(match.id, outcome)} onSettle={(result) => report(match, result)} onSubmit={() => submitForMatch(match)} pendingPrediction={submitPrediction.isPending && submitPrediction.variables?.data.matchId === match.id} pendingSettlement={(reportMatchResult.isPending && reportMatchResult.variables?.matchId === match.id) || (confirmMatchResult.isPending && confirmMatchResult.variables?.matchId === match.id)} roomHostId={room.hostPlayerId} selectedOutcome={selectedByMatch[match.id]} />)}
               </div>
             )}
           </section>
@@ -644,7 +725,7 @@ export default function RoomPage() {
             <Leaderboard entries={entries} error={leaderboardQuery.error} loading={leaderboardQuery.isLoading} />
             <div className="mt-4 rounded-[22px] border border-white/8 bg-white/[0.025] p-4" data-testid="card-how-it-works">
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-500">How it works</p>
-              <div className="mt-3 space-y-3 text-xs leading-5 text-slate-400"><p><span className="mr-2 font-mono text-lime-300">01</span>Create a Player A v Player B challenge.</p><p><span className="mr-2 font-mono text-lime-300">02</span>Pick A, B, or draw before the scheduled time.</p><p><span className="mr-2 font-mono text-lime-300">03</span>The creator or room host records the result and points settle.</p></div>
+               <div className="mt-3 space-y-3 text-xs leading-5 text-slate-400"><p><span className="mr-2 font-mono text-lime-300">01</span>Register your DLS username.</p><p><span className="mr-2 font-mono text-lime-300">02</span>Create a challenge or pick A, B, or draw before kickoff.</p><p><span className="mr-2 font-mono text-lime-300">03</span>Both challenged players confirm the reported result before points settle.</p></div>
             </div>
           </aside>
         </div>

@@ -3,6 +3,7 @@ import {
   real,
   text,
   timestamp,
+  boolean,
   uniqueIndex,
   uuid,
   pgTable,
@@ -15,6 +16,9 @@ export const playersTable = pgTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
+    registeredAt: timestamp("registered_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -25,6 +29,8 @@ export const matchesTable = pgTable("matches", {
   id: uuid("id").defaultRandom().primaryKey(),
   roomId: uuid("room_id"),
   createdBy: text("created_by"),
+  playerAId: text("player_a_id"),
+  playerBId: text("player_b_id"),
   homeTeam: text("home_team").notNull(),
   awayTeam: text("away_team").notNull(),
   kickoffAt: timestamp("kickoff_at", { withTimezone: true }).notNull(),
@@ -33,6 +39,9 @@ export const matchesTable = pgTable("matches", {
   drawOdds: real("draw_odds").notNull(),
   awayOdds: real("away_odds").notNull(),
   result: text("result"),
+  resultReported: text("result_reported"),
+  playerAConfirmed: boolean("player_a_confirmed").notNull().default(false),
+  playerBConfirmed: boolean("player_b_confirmed").notNull().default(false),
   homeScore: integer("home_score"),
   awayScore: integer("away_score"),
   createdAt: timestamp("created_at", { withTimezone: true })

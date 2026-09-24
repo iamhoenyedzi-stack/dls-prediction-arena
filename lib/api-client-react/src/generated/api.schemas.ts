@@ -31,6 +31,15 @@ export const MatchResult = {
   b: 'b',
 } as const;
 
+export type MatchResultReported = typeof MatchResultReported[keyof typeof MatchResultReported] | null;
+
+
+export const MatchResultReported = {
+  a: 'a',
+  draw: 'draw',
+  b: 'b',
+} as const;
+
 export interface PlayerRecord {
   /** @minimum 0 */
   wins: number;
@@ -40,6 +49,8 @@ export interface PlayerRecord {
 
 export interface Match {
   id: string;
+  playerAId?: string | null;
+  playerBId?: string | null;
   playerAName: string;
   playerBName: string;
   scheduledAt: string;
@@ -48,27 +59,56 @@ export interface Match {
   drawOdds: number;
   playerBOdds: number;
   result?: MatchResult;
+  resultReported?: MatchResultReported;
+  playerAConfirmed: boolean;
+  playerBConfirmed: boolean;
   creatorPlayerId?: string | null;
   playerARecord: PlayerRecord;
   playerBRecord: PlayerRecord;
 }
 
-export type MatchResultRequestResult = typeof MatchResultRequestResult[keyof typeof MatchResultRequestResult];
+export type ReportMatchResultRequestResult = typeof ReportMatchResultRequestResult[keyof typeof ReportMatchResultRequestResult];
 
 
-export const MatchResultRequestResult = {
+export const ReportMatchResultRequestResult = {
   a: 'a',
   draw: 'draw',
   b: 'b',
 } as const;
 
-export interface MatchResultRequest {
+export interface ReportMatchResultRequest {
   /**
      * @minLength 3
      * @maxLength 64
      */
   actorPlayerId: string;
-  result: MatchResultRequestResult;
+  result: ReportMatchResultRequestResult;
+}
+
+export interface ConfirmMatchResultRequest {
+  /**
+     * @minLength 3
+     * @maxLength 64
+     */
+  actorPlayerId: string;
+}
+
+export interface RegisterPlayerRequest {
+  /**
+     * @minLength 2
+     * @maxLength 24
+     */
+  dlsUsername: string;
+}
+
+export interface RegisteredPlayer {
+  id: string;
+  dlsUsername: string;
+  /** @minimum 0 */
+  wins: number;
+  /** @minimum 0 */
+  losses: number;
+  createdAt: string;
 }
 
 export interface CreateMatchRequest {
@@ -78,15 +118,10 @@ export interface CreateMatchRequest {
      */
   creatorPlayerId: string;
   /**
-     * @minLength 2
-     * @maxLength 40
+     * @minLength 3
+     * @maxLength 64
      */
-  playerAName: string;
-  /**
-     * @minLength 2
-     * @maxLength 40
-     */
-  playerBName: string;
+  opponentPlayerId: string;
   scheduledAt: string;
 }
 

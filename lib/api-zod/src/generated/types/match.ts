@@ -6,11 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MatchResult } from './matchResult';
+import type { MatchResultReported } from './matchResultReported';
 import type { MatchStatus } from './matchStatus';
 import type { PlayerRecord } from './playerRecord';
 
 export interface Match {
   id: string;
+  playerAId?: string | null;
+  playerBId?: string | null;
   playerAName: string;
   playerBName: string;
   scheduledAt: Date;
@@ -19,6 +22,9 @@ export interface Match {
   drawOdds: number;
   playerBOdds: number;
   result?: MatchResult;
+  resultReported?: MatchResultReported;
+  playerAConfirmed: boolean;
+  playerBConfirmed: boolean;
   creatorPlayerId?: string | null;
   playerARecord: PlayerRecord;
   playerBRecord: PlayerRecord;
